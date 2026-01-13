@@ -79,7 +79,9 @@ The VST3 plugin will be in `build/Unravel_artefacts/Release/VST3/`
 
 ## License
 
-Copyright 2024 ZQ SFX. All rights reserved.
+This project is licensed under the **GNU General Public License v3.0** - see the [LICENSE](LICENSE) file for details.
+
+Copyright 2024 ZQ SFX.
 
 ## Support
 
