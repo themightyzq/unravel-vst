@@ -40,6 +40,7 @@ jobs:
             libasound2-dev \
             libjack-jackd2-dev \
             ladspa-sdk \
+            libfreetype-dev \
             libfreetype6-dev \
             libx11-dev \
             libxcomposite-dev \
@@ -49,7 +50,9 @@ jobs:
             libxrandr-dev \
             libxrender-dev \
             libglu1-mesa-dev \
-            mesa-common-dev
+            mesa-common-dev \
+            libgtk-3-dev \
+            pkg-config
 
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
