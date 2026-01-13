@@ -1,0 +1,63 @@
+# Build directories
+build/
+Builds/
+cmake-build-*/
+
+# IDE files
+.idea/
+.vscode/
+*.xcodeproj/
+*.xcworkspace/
+*.sln
+*.vcxproj*
+
+# Compiled files
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Plugin artifacts (built locally)
+*.vst3
+*.vst
+*.component
+*.app
+*.aaxplugin
+
+# JUCE generated
+JuceLibraryCode/
+
+# macOS
+.DS_Store
+*.dSYM/
+
+# Windows
+Thumbs.db
+*.user
+*.suo
+
+# Linux
+*.d
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.bak
+*~
+
+# Test artifacts
+test_output/
+*.wav
+
+# Package manager
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+.env

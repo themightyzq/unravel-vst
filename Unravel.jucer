@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<JUCERPROJECT id="UnRvPl" name="Unravel" projectType="audioplug" useAppConfig="0"
+              addUsingNamespaceToJuceHeader="0" jucerFormatVersion="1" companyName="ZQ SFX"
+              companyCopyright="Copyright (c) 2024 ZQ SFX" companyWebsite="https://zqsfx.com"
+              companyEmail="support@zqsfx.com" pluginFormats="buildVST3"
+              pluginCharacteristicsValue="pluginWantsMidiIn,pluginProducesMidiOut,pluginIsMidiEffect"
+              pluginName="Unravel" pluginDesc="Spectral Decomposition Plugin"
+              pluginManufacturer="ZQ SFX" pluginManufacturerCode="ZQSF"
+              pluginCode="Unrv" pluginChannelConfigs="{1,1},{2,2}" pluginIsSynth="0"
+              pluginWantsMidiIn="0" pluginProducesMidiOut="0" pluginIsMidiEffect="0"
+              pluginEditorRequiresKeys="0" pluginAUExportPrefix="UnravelAU"
+              pluginRTASCategory="" aaxIdentifier="com.zqsfx.unravel" pluginAAXCategory="2"
+              bundleIdentifier="com.zqsfx.unravel" version="1.0.0" buildVST="0"
+              buildVST3="1" buildAU="0" buildAUv3="0" buildRTAS="0" buildAAX="0"
+              buildStandalone="0" enableIAA="0" cppLanguageStandard="17">
+  <MAINGROUP id="kM8fHg" name="Unravel">
+    <GROUP id="{B5E4D5A8-9F4B-A5C7-E8D2-1A3B6C9D2E4F}" name="Source">
+      <FILE id="x7m3de" name="PluginProcessor.cpp" compile="1" resource="0"
+            file="Source/PluginProcessor.cpp"/>
+      <FILE id="wdh87n" name="PluginProcessor.h" compile="0" resource="0"
+            file="Source/PluginProcessor.h"/>
+      <FILE id="qwl93k" name="PluginEditor.cpp" compile="1" resource="0"
+            file="Source/PluginEditor.cpp"/>
+      <FILE id="dje82h" name="PluginEditor.h" compile="0" resource="0"
+            file="Source/PluginEditor.h"/>
+      <GROUP id="{C3F7A9B2-8D5E-4A1C-9B2F-6E8D3C7A9F5B}" name="DSP">
+        <FILE id="fhe93j" name="SpectralProcessor.cpp" compile="1" resource="0"
+              file="Source/DSP/SpectralProcessor.cpp"/>
+        <FILE id="kdo29f" name="SpectralProcessor.h" compile="0" resource="0"
+              file="Source/DSP/SpectralProcessor.h"/>
+        <FILE id="pqo82n" name="FFTProcessor.cpp" compile="1" resource="0"
+              file="Source/DSP/FFTProcessor.cpp"/>
+        <FILE id="wer45h" name="FFTProcessor.h" compile="0" resource="0"
+              file="Source/DSP/FFTProcessor.h"/>
+        <FILE id="zxc98k" name="TonalNoiseDecomposer.cpp" compile="1" resource="0"
+              file="Source/DSP/TonalNoiseDecomposer.cpp"/>
+        <FILE id="mnb67j" name="TonalNoiseDecomposer.h" compile="0" resource="0"
+              file="Source/DSP/TonalNoiseDecomposer.h"/>
+      </GROUP>
+      <GROUP id="{D8E5C3A7-2B9F-4E8A-B5C1-9A3D6F8E2C7B}" name="GUI">
+        <FILE id="qwe45g" name="CustomLookAndFeel.cpp" compile="1" resource="0"
+              file="Source/GUI/CustomLookAndFeel.cpp"/>
+        <FILE id="asd78h" name="CustomLookAndFeel.h" compile="0" resource="0"
+              file="Source/GUI/CustomLookAndFeel.h"/>
+        <FILE id="zxc12k" name="VerticalSlider.cpp" compile="1" resource="0"
+              file="Source/GUI/VerticalSlider.cpp"/>
+        <FILE id="vbn34m" name="VerticalSlider.h" compile="0" resource="0"
+              file="Source/GUI/VerticalSlider.h"/>
+      </GROUP>
+      <GROUP id="{F9A8C2D5-7E3B-4A6C-8D9F-2B5C7E8A9D3F}" name="Parameters">
+        <FILE id="rty56u" name="ParameterDefinitions.h" compile="0" resource="0"
+              file="Source/Parameters/ParameterDefinitions.h"/>
+      </GROUP>
+    </GROUP>
+  </MAINGROUP>
+  <JUCEOPTIONS JUCE_STRICT_REFCOUNTEDPOINTER="1" JUCE_VST3_CAN_REPLACE_VST2="0"
+               JUCE_USE_CURL="0" JUCE_WEB_BROWSER="0" JUCE_DISPLAY_SPLASH_SCREEN="0"
+               JUCE_REPORT_APP_USAGE="0" JUCE_MODAL_LOOPS_PERMITTED="0"/>
+  <EXPORTFORMATS>
+    <XCODE_MAC targetFolder="Builds/MacOSX" customXcodeResourceFolders=""
+               extraCompilerFlags="-Wall -Wextra" extraLinkerFlags="">
+      <CONFIGURATIONS>
+        <CONFIGURATION isDebug="1" name="Debug" targetName="Unravel" optimisation="1"
+                       enablePluginBinaryCopyStep="1" osxArchitecture="Native"
+                       macOSDeploymentTarget="10.13"/>
+        <CONFIGURATION isDebug="0" name="Release" targetName="Unravel" optimisation="3"
+                       enablePluginBinaryCopyStep="1" osxArchitecture="Native"
+                       macOSDeploymentTarget="10.13" linkTimeOptimisation="1"/>
+      </CONFIGURATIONS>
+      <MODULEPATHS>
+        <MODULEPATH id="juce_audio_basics" path="JUCE/modules"/>
+        <MODULEPATH id="juce_audio_devices" path="JUCE/modules"/>
+        <MODULEPATH id="juce_audio_formats" path="JUCE/modules"/>
+        <MODULEPATH id="juce_audio_plugin_client" path="JUCE/modules"/>
+        <MODULEPATH id="juce_audio_processors" path="JUCE/modules"/>
+        <MODULEPATH id="juce_audio_utils" path="JUCE/modules"/>
+        <MODULEPATH id="juce_core" path="JUCE/modules"/>
+        <MODULEPATH id="juce_data_structures" path="JUCE/modules"/>
+        <MODULEPATH id="juce_dsp" path="JUCE/modules"/>
+        <MODULEPATH id="juce_events" path="JUCE/modules"/>
+        <MODULEPATH id="juce_graphics" path="JUCE/modules"/>
+        <MODULEPATH id="juce_gui_basics" path="JUCE/modules"/>
+        <MODULEPATH id="juce_gui_extra" path="JUCE/modules"/>
+      </MODULEPATHS>
+    </XCODE_MAC>
+    <VS2022 targetFolder="Builds/VisualStudio2022" extraCompilerFlags="/W4">
+      <CONFIGURATIONS>
+        <CONFIGURATION isDebug="1" name="Debug" targetName="Unravel" optimisation="1"
+                       enablePluginBinaryCopyStep="1" winArchitecture="x64"/>
+        <CONFIGURATION isDebug="0" name="Release" targetName="Unravel" optimisation="3"
+                       enablePluginBinaryCopyStep="1" winArchitecture="x64"
+                       linkTimeOptimisation="1"/>
+      </CONFIGURATIONS>
+      <MODULEPATHS>
+        <MODULEPATH id="juce_audio_basics" path="JUCE/modules"/>
+        <MODULEPATH id="juce_audio_devices" path="JUCE/modules"/>
+        <MODULEPATH id="juce_audio_formats" path="JUCE/modules"/>
+        <MODULEPATH id="juce_audio_plugin_client" path="JUCE/modules"/>
+        <MODULEPATH id="juce_audio_processors" path="JUCE/modules"/>
+        <MODULEPATH id="juce_audio_utils" path="JUCE/modules"/>
+        <MODULEPATH id="juce_core" path="JUCE/modules"/>
+        <MODULEPATH id="juce_data_structures" path="JUCE/modules"/>
+        <MODULEPATH id="juce_dsp" path="JUCE/modules"/>
+        <MODULEPATH id="juce_events" path="JUCE/modules"/>
+        <MODULEPATH id="juce_graphics" path="JUCE/modules"/>
+        <MODULEPATH id="juce_gui_basics" path="JUCE/modules"/>
+        <MODULEPATH id="juce_gui_extra" path="JUCE/modules"/>
+      </MODULEPATHS>
+    </VS2022>
+    <LINUX_MAKE targetFolder="Builds/LinuxMakefile" extraCompilerFlags="-Wall -Wextra">
+      <CONFIGURATIONS>
+        <CONFIGURATION isDebug="1" name="Debug" targetName="Unravel" optimisation="1"/>
+        <CONFIGURATION isDebug="0" name="Release" targetName="Unravel" optimisation="3"
+                       linkTimeOptimisation="1"/>
+      </CONFIGURATIONS>
+      <MODULEPATHS>
+        <MODULEPATH id="juce_audio_basics" path="JUCE/modules"/>
+        <MODULEPATH id="juce_audio_devices" path="JUCE/modules"/>
+        <MODULEPATH id="juce_audio_formats" path="JUCE/modules"/>
+        <MODULEPATH id="juce_audio_plugin_client" path="JUCE/modules"/>
+        <MODULEPATH id="juce_audio_processors" path="JUCE/modules"/>
+        <MODULEPATH id="juce_audio_utils" path="JUCE/modules"/>
+        <MODULEPATH id="juce_core" path="JUCE/modules"/>
+        <MODULEPATH id="juce_data_structures" path="JUCE/modules"/>
+        <MODULEPATH id="juce_dsp" path="JUCE/modules"/>
+        <MODULEPATH id="juce_events" path="JUCE/modules"/>
+        <MODULEPATH id="juce_graphics" path="JUCE/modules"/>
+        <MODULEPATH id="juce_gui_basics" path="JUCE/modules"/>
+        <MODULEPATH id="juce_gui_extra" path="JUCE/modules"/>
+      </MODULEPATHS>
+    </LINUX_MAKE>
+  </EXPORTFORMATS>
+  <MODULES>
+    <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_audio_devices" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_audio_formats" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_audio_plugin_client" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_audio_processors" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_audio_utils" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_core" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_dsp" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_events" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+    <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>
+  </MODULES>
+</JUCERPROJECT>
