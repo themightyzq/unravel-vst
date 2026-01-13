@@ -2,6 +2,8 @@
 
 **Spectral Decomposition Plugin for Tonal/Noise Separation**
 
+![Unravel Plugin Interface](assets/screenshot.png)
+
 Unravel is a professional audio plugin that separates tonal (harmonic) and noise (stochastic) components in audio using HPSS (Harmonic-Percussive Source Separation) algorithms.
 
 ## Features
