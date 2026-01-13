@@ -32,7 +32,7 @@ Requirements:
 - C++17 compiler (Xcode, Visual Studio 2022, or GCC 9+)
 
 ```bash
-git clone --recursive https://github.com/YOUR_USERNAME/unravel-vst.git
+git clone --recursive https://github.com/themightyzq/unravel-vst.git
 cd unravel-vst
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
