@@ -1,6 +1,6 @@
 #pragma once
 
-#include "JuceIncludes.h"
+#include <JuceHeader.h>
 #include "STFTProcessor.h"
 #include "MagPhaseFrame.h"
 #include "MaskEstimator.h"
