@@ -1,6 +1,6 @@
 #pragma once
 
-#include "JuceIncludes.h"
+#include <JuceHeader.h>
 #include <vector>
 #include <memory>
 #include <complex>
