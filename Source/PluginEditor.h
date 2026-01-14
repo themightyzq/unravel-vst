@@ -27,8 +27,10 @@ private:
     juce::Label titleLabel;
     juce::TextButton bypassButton;
     juce::TextButton qualityButton;
+    juce::TextButton debugButton;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> qualityAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> debugAttachment;
 
     // Separation knobs (rotary style)
     juce::Slider separationKnob;

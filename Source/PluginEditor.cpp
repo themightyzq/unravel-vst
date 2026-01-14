@@ -91,6 +91,20 @@ void UnravelAudioProcessorEditor::setupHeader()
     addAndMakeVisible(qualityButton);
     qualityAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         audioProcessor.getAPVTS(), ParameterIDs::quality, qualityButton);
+
+    // Debug button - STFT passthrough for debugging
+    debugButton.setButtonText("DBG");
+    debugButton.setClickingTogglesState(true);
+    debugButton.setColour(juce::TextButton::buttonColourId, bgLight);
+    debugButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xffff6600));
+    debugButton.setColour(juce::TextButton::textColourOffId, textDim);
+    debugButton.setColour(juce::TextButton::textColourOnId, juce::Colours::white);
+    debugButton.setTooltip("STFT Debug: Bypasses mask estimation and passes audio through STFT only. "
+                           "If distortion disappears when ON, the bug is in mask estimation. "
+                           "If distortion persists, the bug is in STFT processing.");
+    addAndMakeVisible(debugButton);
+    debugAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        audioProcessor.getAPVTS(), ParameterIDs::debugPassthrough, debugButton);
 }
 
 void UnravelAudioProcessorEditor::setupKnobs()
@@ -301,9 +315,10 @@ void UnravelAudioProcessorEditor::resized()
     auto header = bounds.removeFromTop(headerHeight).reduced(padding, 0);
     titleLabel.setBounds(header.removeFromLeft(90).withTrimmedTop(10));
 
-    // Right side: Bypass + HQ buttons
-    auto headerRight = header.removeFromRight(130);
-    qualityButton.setBounds(headerRight.removeFromRight(50).reduced(4, 10));
+    // Right side: Bypass + HQ + DBG buttons
+    auto headerRight = header.removeFromRight(180);
+    debugButton.setBounds(headerRight.removeFromRight(45).reduced(4, 10));
+    qualityButton.setBounds(headerRight.removeFromRight(45).reduced(4, 10));
     bypassButton.setBounds(headerRight.reduced(4, 10));
 
     // Center: Preset dropdown

@@ -129,6 +129,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout UnravelAudioProcessor::creat
         true // Default: High quality mode for better separation
     ));
 
+    // Debug Passthrough: Skip mask estimation for STFT debugging
+    params.push_back(std::make_unique<juce::AudioParameterBool>(
+        ParameterIDs::debugPassthrough,
+        "STFT Debug",
+        false // Default: OFF (normal processing)
+    ));
+
     return { params.begin(), params.end() };
 }
 
@@ -273,6 +280,7 @@ void UnravelAudioProcessor::updateParameters() noexcept
     const float focusValue = apvts.getRawParameterValue(ParameterIDs::focus)->load();
     const float spectralFloorPercent = apvts.getRawParameterValue(ParameterIDs::spectralFloor)->load();
     const bool qualityMode = apvts.getRawParameterValue(ParameterIDs::quality)->load() > 0.5f;
+    const bool debugPassthrough = apvts.getRawParameterValue(ParameterIDs::debugPassthrough)->load() > 0.5f;
 
     // Get solo/mute states
     soloTonal = apvts.getRawParameterValue(ParameterIDs::soloTonal)->load() > 0.5f;
@@ -333,6 +341,7 @@ void UnravelAudioProcessor::updateParameters() noexcept
             processor->setSeparation(currentSeparation);
             processor->setFocus(currentFocus);
             processor->setSpectralFloor(currentSpectralFloor);
+            processor->setDebugPassthrough(debugPassthrough);
 
             // Apply quality mode change if needed
             if (qualityModeChanged)
