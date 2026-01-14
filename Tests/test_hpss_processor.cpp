@@ -3,7 +3,7 @@
  * Verifies that the new HPSS processor works correctly with the plugin
  */
 
-#include <JuceHeader.h>
+#include "DSP/JuceIncludes.h"
 #include "../Source/DSP/HPSSProcessor.h"
 #include <cassert>
 #include <cmath>
@@ -185,7 +185,15 @@ private:
     }
 };
 
-#ifdef COMPILE_TESTS
+// Namespace function for unified test runner
+namespace hpss_tests {
+    void run() {
+        HPSSProcessorTest::runAllTests();
+    }
+}
+
+#ifndef COMPILE_TESTS
+// Standalone entry point when building this file alone
 int main()
 {
     HPSSProcessorTest::runAllTests();

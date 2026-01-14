@@ -39,7 +39,8 @@ void MaskEstimator::prepare(int numBins, double sampleRate) noexcept
     // Pre-allocate all memory once - NO allocations during processing
     magnitudeHistoryData.resize(horizontalMedianSize * numBins, 0.0f);
     historyWriteIndex = 0;
-    
+    framesReceived = 0;  // Start with no valid frames
+
     isInitialized = true;
 }
 
@@ -71,6 +72,7 @@ void MaskEstimator::reset() noexcept
     juce::FloatVectorOperations::clear(magnitudeHistoryData.data(),
                                        horizontalMedianSize * numBins);
     historyWriteIndex = 0;
+    framesReceived = 0;  // Reset valid frame count
 }
 
 void MaskEstimator::updateGuides(juce::Span<const float> magnitudes) noexcept
@@ -85,6 +87,10 @@ void MaskEstimator::updateGuides(juce::Span<const float> magnitudes) noexcept
 
     // Advance write index (wrap around)
     historyWriteIndex = (historyWriteIndex + 1) % horizontalMedianSize;
+
+    // Track how many valid frames we have (cap at horizontalMedianSize)
+    if (framesReceived < horizontalMedianSize)
+        framesReceived++;
 
     // Compute horizontal and vertical median filters
     computeHorizontalMedian();
@@ -139,14 +145,22 @@ void MaskEstimator::computeMasks(juce::Span<float> tonalMask, juce::Span<float> 
         float tonalPower = horizontalGuide[i] * horizontalGuide[i];
         float noisePower = verticalGuide[i] * verticalGuide[i];
 
+        // NUMERICAL STABILITY: Ensure minimum power levels to prevent
+        // division instability and NaN propagation through the mask exponent.
+        // This is critical when processing starts (few valid frames) or
+        // during silence.
+        const float minPower = eps * 100.0f;  // Minimum power floor
+        tonalPower = std::max(tonalPower, minPower);
+        noisePower = std::max(noisePower, minPower);
+
         // Enhance discrimination using spectral features:
         // - High spectral flux indicates transient/noise content
         // - High spectral flatness indicates noise-like content
         const float fluxPenalty = spectralFlux[i] * 0.7f;      // Penalize tonal if high flux
         const float flatnessPenalty = spectralFlatness[i] * 0.5f;  // Penalize tonal if flat
 
-        // Apply penalties to tonal power estimate
-        tonalPower *= (1.0f - fluxPenalty) * (1.0f - flatnessPenalty);
+        // Apply penalties to tonal power estimate (clamp to avoid going negative)
+        tonalPower *= std::max(0.01f, (1.0f - fluxPenalty) * (1.0f - flatnessPenalty));
 
         // Boost noise power estimate based on same features
         noisePower *= (1.0f + fluxPenalty * 0.5f) * (1.0f + flatnessPenalty * 0.5f);
@@ -170,12 +184,16 @@ void MaskEstimator::computeMasks(juce::Span<float> tonalMask, juce::Span<float> 
         }
 
         // Wiener gain: ratio of signal power to total power
-        const float totalPower = tonalPower + noisePower + eps;
-        const float wienerGain = tonalPower / totalPower;
+        const float totalPower = tonalPower + noisePower;
+        const float wienerGain = (totalPower > eps)
+            ? std::clamp(tonalPower / totalPower, 0.0f, 1.0f)
+            : 0.5f;  // Neutral fallback for safety
 
         // Apply mask exponent for sharpness control
         // pow(x, exp) where exp > 1 makes the mask more binary/dramatic
-        combinedMask[i] = std::pow(wienerGain, maskExponent);
+        // Use safe pow that handles edge cases
+        const float safeMask = std::pow(std::max(wienerGain, 0.0f), maskExponent);
+        combinedMask[i] = std::isfinite(safeMask) ? safeMask : 0.5f;  // Fallback to neutral
     }
 
     // Apply temporal smoothing with asymmetric attack/release
@@ -205,15 +223,25 @@ void MaskEstimator::computeHorizontalMedian() noexcept
 {
     // Horizontal median: median across time frames for each frequency bin
     // Enhances sustained tones and harmonic content
+    //
+    // IMPORTANT: Only use frames that have actually been filled with data!
+    // Using uninitialized (zero) frames causes unstable median values that
+    // propagate through the Wiener filter as garbage/crackling artifacts.
+    const int validFrames = std::max(1, framesReceived);
+
     for (int bin = 0; bin < numBins; ++bin)
     {
-        // Copy magnitudes from all time frames for this frequency bin
-        for (int t = 0; t < horizontalMedianSize; ++t)
+        // Copy magnitudes from only the VALID time frames for this frequency bin
+        // Valid frames are the most recent ones in the ring buffer
+        for (int t = 0; t < validFrames; ++t)
         {
-            tempBuffer[t] = getHistoryFrame(t)[bin];
+            // Access frames from newest to oldest within valid range
+            // getHistoryFrame(horizontalMedianSize - 1) is the newest
+            const int frameOffset = horizontalMedianSize - validFrames + t;
+            tempBuffer[t] = getHistoryFrame(frameOffset)[bin];
         }
 
-        horizontalGuide[bin] = computeMedian(tempBuffer.data(), horizontalMedianSize);
+        horizontalGuide[bin] = computeMedian(tempBuffer.data(), validFrames);
     }
 }
 

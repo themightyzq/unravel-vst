@@ -1,6 +1,6 @@
 #pragma once
 
-#include <JuceHeader.h>
+#include "JuceIncludes.h"
 #include <vector>
 #include <memory>
 #include <complex>
@@ -250,7 +250,16 @@ private:
         }
         
         int getSize() const noexcept { return size_; }
-        
+
+        // Get the number of readable samples (distance from read to write position)
+        int getReadableDistance() const noexcept
+        {
+            if (writePos_ >= readPos_)
+                return writePos_ - readPos_;
+            else
+                return size_ - readPos_ + writePos_;
+        }
+
     private:
         std::vector<float> data_;
         int size_ = 0;
@@ -273,6 +282,7 @@ private:
     int samplesInOutputBuffer_ = 0;
     std::atomic<bool> frameReady_{false};
     bool isInitialized_ = false;
+    bool isFirstFrame_ = true;  // Tracks if we need fftSize samples for first frame
     
     // Window scaling factors for perfect reconstruction (COLA)
     float analysisScale_ = 1.0f;

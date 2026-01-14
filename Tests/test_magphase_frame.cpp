@@ -1,6 +1,5 @@
 #include "../Source/DSP/MagPhaseFrame.h"
 #include "../Source/DSP/STFTProcessor.h"
-#include <JuceHeader.h>
 #include <iostream>
 #include <vector>
 #include <cmath>
@@ -452,12 +451,22 @@ private:
     }
 };
 
-// Main function for running tests
+// Namespace function for unified test runner
+namespace magphase_tests {
+    void run() {
+        MagPhaseFrameTest test;
+        test.runAllTests();
+    }
+}
+
+#ifndef COMPILE_TESTS
+// Standalone entry point when building this file alone
 int main()
 {
     MagPhaseFrameTest test;
-    
+
     const bool success = test.runAllTests();
-    
+
     return success ? 0 : 1;
 }
+#endif

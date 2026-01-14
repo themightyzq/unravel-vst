@@ -1,6 +1,6 @@
 #pragma once
 
-#include <JuceHeader.h>
+#include "JuceIncludes.h"
 #include <vector>
 
 /**
@@ -131,6 +131,7 @@ private:
     // Stored as flat contiguous array: [frame0_bin0, frame0_bin1, ..., frame1_bin0, ...]
     std::vector<float> magnitudeHistoryData;
     int historyWriteIndex = 0;  // Points to next frame to write (oldest frame)
+    int framesReceived = 0;     // Track how many valid frames we have (0 to horizontalMedianSize)
 
     // Helper to access magnitude history
     inline float* getHistoryFrame(int frameIndex) noexcept

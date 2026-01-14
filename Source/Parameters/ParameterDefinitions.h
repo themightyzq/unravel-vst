@@ -22,4 +22,7 @@ namespace ParameterIDs
 
     // Quality control
     const juce::String quality = "quality";        // 0: Low latency, 1: High quality
+
+    // Debug control
+    const juce::String debugPassthrough = "debugPassthrough";  // Skip mask estimation for debugging STFT
 }

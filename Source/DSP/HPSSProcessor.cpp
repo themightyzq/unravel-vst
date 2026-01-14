@@ -39,10 +39,12 @@ void HPSSProcessor::prepare(double sampleRate, int maxBlockSize) noexcept
     tempOutputBuffer_.resize(maxBlockSize, 0.0f);
     
     // Prepare bypass buffer with latency compensation
+    // Write position starts ahead of read position by latency amount
+    // This creates the proper delay for bypass mode
     const int latencyInSamples = getLatencyInSamples();
     bypassBuffer_.resize(latencyInSamples + maxBlockSize, 0.0f);
-    bypassWritePos_ = 0;
-    bypassReadPos_ = 0;
+    bypassWritePos_ = latencyInSamples;  // Write ahead by latency
+    bypassReadPos_ = 0;                   // Read from beginning (zeros = initial silence)
     
     isInitialized_ = true;
 }
@@ -70,8 +72,10 @@ void HPSSProcessor::reset() noexcept
     std::fill(noiseMaskBuffer_.begin(), noiseMaskBuffer_.end(), 0.0f);
     std::fill(tempOutputBuffer_.begin(), tempOutputBuffer_.end(), 0.0f);
     std::fill(bypassBuffer_.begin(), bypassBuffer_.end(), 0.0f);
-    
-    bypassWritePos_ = 0;
+
+    // Maintain proper bypass delay offset
+    const int latencyInSamples = getLatencyInSamples();
+    bypassWritePos_ = latencyInSamples;
     bypassReadPos_ = 0;
 }
 
@@ -119,26 +123,31 @@ void HPSSProcessor::processBlock(const float* inputBuffer,
 
     // Main processing pipeline
 
-    // 1. Push input samples to STFT processor
+    // 1. Push input samples to STFT processor and produce frame if ready
     stftProcessor_->pushAndProcess(inputBuffer, numSamples);
 
-    // 2. Process ALL available frames (critical: must process each frame before next)
-    // The loop continues until both:
-    //   - No frame is currently ready AND
-    //   - No more frames can be produced from buffered input
-    while (true)
+    // 2. Process all ready frames
+    // When blockSize > hopSize, multiple frames may be available per block.
+    // After processing each frame, we call pushAndProcess(nullptr, 0) to trigger
+    // processing of additional frames from buffered input. The STFT processor
+    // has a safety check (getReadableDistance >= fftSize) to prevent reading
+    // uninitialized data.
+    while (stftProcessor_->isFrameReady())
     {
-        // If no frame is ready, try to produce one from buffered input
-        if (!stftProcessor_->isFrameReady())
-        {
-            stftProcessor_->pushAndProcess(nullptr, 0);  // Try to produce frame from buffer
-            if (!stftProcessor_->isFrameReady())
-                break;  // No more frames available
-        }
-
-        // Process the ready frame
         // Get current frequency domain frame
         auto complexFrame = stftProcessor_->getCurrentFrame();
+
+        // DEBUG PASSTHROUGH MODE: Skip mask estimation, just pass STFT through
+        if (debugPassthroughEnabled_)
+        {
+            // Just pass the frame through unchanged (identity processing)
+            // This isolates whether distortion is in STFT or mask estimation
+            stftProcessor_->setCurrentFrame(complexFrame);
+
+            // Try to trigger another frame from buffered input
+            stftProcessor_->pushAndProcess(nullptr, 0);
+            continue;
+        }
 
         // Convert to magnitude/phase representation
         magPhaseFrame_->fromComplex(complexFrame);
@@ -180,13 +189,17 @@ void HPSSProcessor::processBlock(const float* inputBuffer,
 
         // Set the processed frame back to STFT processor
         stftProcessor_->setCurrentFrame(complexFrame);
+
+        // Try to trigger another frame from buffered input
+        // This is safe because pushAndProcess checks getReadableDistance >= fftSize
+        stftProcessor_->pushAndProcess(nullptr, 0);
     }
 
     // 3. Extract output samples from STFT processor
     stftProcessor_->processOutput(outputBuffer, numSamples);
     
-    // 4. Apply safety limiting if enabled
-    if (safetyLimitingEnabled_)
+    // 4. Apply safety limiting if enabled (but skip in debug passthrough mode)
+    if (safetyLimitingEnabled_ && !debugPassthroughEnabled_)
     {
         applySafetyLimiting(outputBuffer, numSamples);
     }
@@ -341,20 +354,20 @@ juce::Span<const float> HPSSProcessor::getCurrentNoiseMask() const noexcept
 void HPSSProcessor::initializeComponents() noexcept
 {
     // Choose STFT configuration based on quality mode
-    STFTProcessor::Config stftConfig = useHighQuality_ 
+    STFTProcessor::Config stftConfig = useHighQuality_
         ? STFTProcessor::Config::highQuality()    // 2048/512 - ~32ms latency
         : STFTProcessor::Config::lowLatency();    // 1024/256 - ~15ms latency
-    
+
     // Create STFT processor
     stftProcessor_ = std::make_unique<STFTProcessor>(stftConfig);
     stftProcessor_->prepare(currentSampleRate_, currentBlockSize_);
-    
-    // Store number of bins
+
+    // Store number of bins (may have changed with quality mode)
     numBins_ = stftProcessor_->getNumBins();
-    
+
     // Create magnitude/phase frame
     magPhaseFrame_ = std::make_unique<MagPhaseFrame>(numBins_);
-    
+
     // Create mask estimator
     maskEstimator_ = std::make_unique<MaskEstimator>();
     maskEstimator_->prepare(numBins_, currentSampleRate_);
@@ -362,6 +375,17 @@ void HPSSProcessor::initializeComponents() noexcept
     // Apply current separation parameters
     maskEstimator_->setSeparation(separation_);
     maskEstimator_->setFocus(focus_);
+
+    // Resize mask buffers for new bin count (critical when switching quality modes)
+    tonalMaskBuffer_.resize(numBins_, 0.0f);
+    noiseMaskBuffer_.resize(numBins_, 0.0f);
+
+    // Resize and reinitialize bypass buffer for new latency
+    const int latencyInSamples = getLatencyInSamples();
+    bypassBuffer_.resize(latencyInSamples + currentBlockSize_, 0.0f);
+    std::fill(bypassBuffer_.begin(), bypassBuffer_.end(), 0.0f);
+    bypassWritePos_ = latencyInSamples;
+    bypassReadPos_ = 0;
 }
 
 void HPSSProcessor::updateParameterSmoothing(float tonalGain, float noiseGain, int numSamples) noexcept

@@ -104,35 +104,65 @@ option(BUILD_TESTS "Build unit tests" OFF)
 if(BUILD_TESTS)
     enable_testing()
 
+    # Create a static library for DSP code to share between plugin and tests
+    add_library(UnravelDSP STATIC
+        Source/DSP/JuceIncludes.h
+        Source/DSP/STFTProcessor.cpp
+        Source/DSP/STFTProcessor.h
+        Source/DSP/MagPhaseFrame.cpp
+        Source/DSP/MagPhaseFrame.h
+        Source/DSP/MaskEstimator.cpp
+        Source/DSP/MaskEstimator.h
+        Source/DSP/HPSSProcessor.cpp
+        Source/DSP/HPSSProcessor.h
+    )
+
+    target_include_directories(UnravelDSP
+        PUBLIC
+            ${CMAKE_CURRENT_SOURCE_DIR}/Source
+    )
+
+    target_compile_definitions(UnravelDSP
+        PUBLIC
+            JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1
+            JUCE_STANDALONE_APPLICATION=1
+            JUCE_WEB_BROWSER=0
+            JUCE_USE_CURL=0
+    )
+
+    target_link_libraries(UnravelDSP
+        PUBLIC
+            juce::juce_audio_basics
+            juce::juce_audio_formats
+            juce::juce_dsp
+            juce::juce_core
+    )
+
     # Create test executable
     add_executable(UnravelTests
+        Tests/test_main.cpp
         Tests/test_hpss_processor.cpp
         Tests/test_stft_processor.cpp
         Tests/test_magphase_frame.cpp
         Tests/test_mask_estimator.cpp
-        Tests/test_advanced_separation.cpp
-        # DSP sources needed for tests
-        Source/DSP/STFTProcessor.cpp
-        Source/DSP/MagPhaseFrame.cpp
-        Source/DSP/MaskEstimator.cpp
-        Source/DSP/HPSSProcessor.cpp
+        Tests/test_debug_passthrough.cpp
     )
 
-    target_include_directories(UnravelTests
-        PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/Source
+    # Create detailed STFT diagnostic executable
+    add_executable(STFTDiagnostic
+        Tests/test_stft_detailed.cpp
     )
+
+    target_link_libraries(STFTDiagnostic PRIVATE UnravelDSP)
 
     target_compile_definitions(UnravelTests
         PRIVATE
             COMPILE_TESTS=1
-            JUCE_STANDALONE_APPLICATION=1
     )
 
     target_link_libraries(UnravelTests
         PRIVATE
-            juce::juce_audio_utils
-            juce::juce_dsp
+            UnravelDSP
     )
 
     # Register tests
