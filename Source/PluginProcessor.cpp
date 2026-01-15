@@ -3,17 +3,10 @@
 #include <cmath>
 
 UnravelAudioProcessor::UnravelAudioProcessor()
-#ifndef JucePlugin_PreferredChannelConfigurations
-     : AudioProcessor (BusesProperties()
-                     #if ! JucePlugin_IsMidiEffect
-                      #if ! JucePlugin_IsSynth
-                       .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
-                      #endif
-                       .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
-                     #endif
-                       ),
-#endif
-    apvts(*this, nullptr, "Parameters", createParameterLayout())
+     : AudioProcessor(BusesProperties()
+                      .withInput("Input", juce::AudioChannelSet::stereo(), true)
+                      .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+       apvts(*this, nullptr, "Parameters", createParameterLayout())
 {
 }
 
@@ -250,26 +243,14 @@ void UnravelAudioProcessor::releaseResources()
     channelProcessors.clear();
 }
 
-#ifndef JucePlugin_PreferredChannelConfigurations
 bool UnravelAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
-  #if JucePlugin_IsMidiEffect
-    juce::ignoreUnused (layouts);
-    return true;
-  #else
-    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono()
-     && layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
-        return false;
-
-   #if ! JucePlugin_IsSynth
+    // Stereo only, input must match output
     if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
         return false;
-   #endif
 
-    return true;
-  #endif
+    return layouts.getMainOutputChannelSet() == juce::AudioChannelSet::stereo();
 }
-#endif
 
 void UnravelAudioProcessor::updateParameters() noexcept
 {

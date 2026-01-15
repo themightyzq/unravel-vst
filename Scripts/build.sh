@@ -74,7 +74,20 @@ if [ -d "$BUILD_DIR/Unravel_artefacts" ]; then
     echo -e "${GREEN}Built plugins:${NC}"
     
     if [ -d "$BUILD_DIR/Unravel_artefacts/$BUILD_TYPE/VST3" ]; then
-        echo "  VST3: $BUILD_DIR/Unravel_artefacts/$BUILD_TYPE/VST3/Unravel.vst3"
+        VST3_PATH="$BUILD_DIR/Unravel_artefacts/$BUILD_TYPE/VST3/Unravel.vst3"
+        echo "  VST3: $VST3_PATH"
+
+        # Verify Universal Binary architecture
+        if [ -f "$VST3_PATH/Contents/MacOS/Unravel" ]; then
+            echo -e "${GREEN}Verifying architecture...${NC}"
+            ARCH_INFO=$(file "$VST3_PATH/Contents/MacOS/Unravel")
+            echo "  $ARCH_INFO"
+            if [[ "$ARCH_INFO" == *"arm64"* ]] && [[ "$ARCH_INFO" == *"x86_64"* ]]; then
+                echo -e "${GREEN}  Universal Binary: OK${NC}"
+            else
+                echo -e "${YELLOW}  WARNING: Not a Universal Binary - Soundminer compatibility may be affected${NC}"
+            fi
+        fi
     fi
     
     if [ -d "$BUILD_DIR/Unravel_artefacts/$BUILD_TYPE/AU" ]; then

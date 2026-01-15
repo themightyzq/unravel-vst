@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.22)
 
+# Universal Binary for macOS (Soundminer compatibility)
+# Must be set BEFORE project() to take effect
+if(APPLE)
+    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Build architectures for macOS")
+endif()
+
 project(Unravel VERSION 1.0.0)
 
 # Set C++ standard
@@ -14,23 +20,20 @@ juce_add_plugin(Unravel
     COMPANY_NAME "ZQ SFX"
     PLUGIN_MANUFACTURER_CODE ZQSF
     PLUGIN_CODE Unrv
-    FORMATS VST3
+    FORMATS VST3 Standalone
     PRODUCT_NAME "Unravel"
     PLUGIN_NAME "Unravel"
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT FALSE
     NEEDS_MIDI_OUTPUT FALSE
     IS_MIDI_EFFECT FALSE
-    EDITOR_WANTS_KEYBOARD_FOCUS TRUE
+    EDITOR_WANTS_KEYBOARD_FOCUS FALSE
     COPY_PLUGIN_AFTER_BUILD TRUE
-    VST3_CATEGORIES "Fx" "Tools" "Restoration"
-    AU_MAIN_TYPE "kAudioUnitType_Effect"
+    VST3_CATEGORIES "Fx" "Spectral"
     COMPANY_WEBSITE "https://zqsfx.com"
     COMPANY_EMAIL "support@zqsfx.com"
     BUNDLE_ID "com.zqsfx.unravel"
     PLUGIN_DESCRIPTION "Spectral decomposition plugin for tonal/noise separation"
-    ICON_BIG ""
-    ICON_SMALL ""
 )
 
 # Generate JuceHeader.h
@@ -68,18 +71,29 @@ target_sources(Unravel
 #     # Add any images or resources here
 # )
 
-# Link libraries
+# Link libraries (matching HyperPrism pattern for Soundminer compatibility)
 target_link_libraries(Unravel
     PRIVATE
+        juce::juce_audio_basics
+        juce::juce_audio_devices
+        juce::juce_audio_formats
+        juce::juce_audio_plugin_client
+        juce::juce_audio_processors
         juce::juce_audio_utils
+        juce::juce_core
+        juce::juce_data_structures
         juce::juce_dsp
+        juce::juce_events
+        juce::juce_graphics
+        juce::juce_gui_basics
+        juce::juce_gui_extra
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags
 )
 
-# Plugin-specific compile definitions
+# Plugin-specific compile definitions (matching HyperPrism exactly)
 target_compile_definitions(Unravel
     PUBLIC
         JUCE_WEB_BROWSER=0
@@ -87,8 +101,8 @@ target_compile_definitions(Unravel
         JUCE_VST3_CAN_REPLACE_VST2=0
         JUCE_DISPLAY_SPLASH_SCREEN=0
         JUCE_REPORT_APP_USAGE=0
-        JUCE_MODAL_LOOPS_PERMITTED=0
-        JUCE_STRICT_REFCOUNTEDPOINTER=1
+        JUCE_JACK=0
+        JUCE_ALSA=0
 )
 
 # Set plugin binary output directory
