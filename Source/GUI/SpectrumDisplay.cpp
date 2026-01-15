@@ -5,6 +5,11 @@ SpectrumDisplay::SpectrumDisplay()
 {
     setOpaque(true);
     startTimerHz(30);  // 30 FPS for smooth visuals
+
+    // Accessibility support
+    setAccessible(true);
+    setTitle("Spectrum Display");
+    setDescription("Real-time frequency visualization showing tonal (blue) and noise (orange) components.");
 }
 
 SpectrumDisplay::~SpectrumDisplay()
@@ -26,6 +31,11 @@ void SpectrumDisplay::setCallbacks(MagnitudeCallback magCallback,
 void SpectrumDisplay::setEnabled(bool shouldBeEnabled)
 {
     isEnabled = shouldBeEnabled;
+    // Stop timer when disabled to save CPU
+    if (shouldBeEnabled)
+        startTimerHz(30);
+    else
+        stopTimer();
     repaint();
 }
 
@@ -274,8 +284,8 @@ void SpectrumDisplay::drawLabels(juce::Graphics& g)
     auto bounds = getLocalBounds().toFloat();
     const float height = bounds.getHeight();
 
-    g.setColour(juce::Colour(0xff666666));
-    g.setFont(juce::Font(9.0f));
+    g.setColour(juce::Colour(0xff888888));  // Improved contrast
+    g.setFont(juce::FontOptions(10.0f));    // Minimum readable size
 
     // dB labels on right side
     for (float db = minDb + 20.0f; db <= maxDb; db += 20.0f)
@@ -308,8 +318,8 @@ void SpectrumDisplay::drawFrequencyLabels(juce::Graphics& g)
     const float width = static_cast<float>(bounds.getWidth());
     const int labelY = bounds.getHeight() - 14;
 
-    g.setColour(juce::Colour(0xff888888));
-    g.setFont(juce::Font(8.0f));
+    g.setColour(juce::Colour(0xff888888));  // Consistent contrast
+    g.setFont(juce::FontOptions(10.0f));    // Minimum readable size
 
     // Frequency markers to display
     const float nyquist = static_cast<float>(currentSampleRate / 2.0);
