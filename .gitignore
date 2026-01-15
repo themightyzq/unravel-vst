@@ -62,3 +62,7 @@ __pycache__/
 *.pyc
 .env
 *.zip
+
+# Developer documentation (not needed for users)
+Documentation/
+docs/
