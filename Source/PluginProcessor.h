@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <juce_dsp/juce_dsp.h>
 #include "DSP/HPSSProcessor.h"
 #include "Parameters/ParameterDefinitions.h"
 
@@ -79,7 +80,16 @@ private:
     double currentSampleRate = 48000.0;
     int currentBlockSize = 512;
 
+    // Brightness filter (high shelf for post-processing)
+    static constexpr float kBrightnessFrequency = 4000.0f;
+    static constexpr float kBrightnessQ = 0.707f;
+    std::array<juce::dsp::IIR::Filter<float>, 2> brightnessFilters_;
+    std::atomic<float>* brightnessParam_ = nullptr;
+    juce::SmoothedValue<float> brightnessGainSmoother_;
+    float lastBrightnessGain_ = 0.0f;
+
     void updateParameters() noexcept;
+    void updateBrightnessCoefficients(double sampleRate, float gainDb);
 
 public:
     // Public access for spectrum visualization

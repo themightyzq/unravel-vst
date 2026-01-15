@@ -129,6 +129,20 @@ juce::AudioProcessorValueTreeState::ParameterLayout UnravelAudioProcessor::creat
         false // Default: OFF (normal processing)
     ));
 
+    // Brightness: High shelf filter for post-processing treble adjustment
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        ParameterIDs::brightness,
+        "Brightness",
+        juce::NormalisableRange<float>(-12.0f, 12.0f, 0.1f),
+        0.0f, // Default: 0 dB (unity/bypass)
+        "dB",
+        juce::AudioProcessorParameter::genericParameter,
+        [](float value, int) {
+            if (std::abs(value) < 0.1f) return juce::String("0 dB");
+            return juce::String(value, 1) + " dB";
+        }
+    ));
+
     return { params.begin(), params.end() };
 }
 
@@ -228,6 +242,24 @@ void UnravelAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBloc
     // Setup parameter smoothers (20ms smoothing time)
     tonalGainSmoothed.reset(sampleRate, 0.02);
     noisyGainSmoothed.reset(sampleRate, 0.02);
+
+    // Initialize brightness filter (post-processing high shelf)
+    brightnessGainSmoother_.reset(sampleRate, 0.02);  // 20ms ramp
+    brightnessGainSmoother_.setCurrentAndTargetValue(0.0f);
+    brightnessParam_ = apvts.getRawParameterValue(ParameterIDs::brightness);
+
+    juce::dsp::ProcessSpec spec;
+    spec.sampleRate = sampleRate;
+    spec.maximumBlockSize = static_cast<uint32_t>(samplesPerBlock);
+    spec.numChannels = 1;
+
+    for (auto& filter : brightnessFilters_)
+    {
+        filter.prepare(spec);
+        filter.reset();
+    }
+    updateBrightnessCoefficients(sampleRate, 0.0f);
+    lastBrightnessGain_ = 0.0f;
 
     // Report latency to host for proper delay compensation
     if (!channelProcessors.empty() && channelProcessors[0])
@@ -381,14 +413,42 @@ void UnravelAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
         
         // Process with HPSS using current gain values (updated in updateParameters)
         // The gains are now responsive to parameter changes
-        processor.processBlock(inputData, outputData, 
+        processor.processBlock(inputData, outputData,
                              tonalBuffers[channel].data(),
                              noiseBuffers[channel].data(),
                              numSamples,
                              currentTonalGain,
                              currentNoisyGain);
     }
-    
+
+    // Apply brightness filter (post-HPSS high shelf processing)
+    if (brightnessParam_ != nullptr)
+    {
+        const float targetBrightness = brightnessParam_->load();
+        brightnessGainSmoother_.setTargetValue(targetBrightness);
+
+        // Update coefficients if gain changed significantly
+        if (std::abs(targetBrightness - lastBrightnessGain_) > 0.1f)
+        {
+            updateBrightnessCoefficients(currentSampleRate, targetBrightness);
+            lastBrightnessGain_ = targetBrightness;
+        }
+
+        // Only process if brightness is not at unity (0dB) or still smoothing
+        if (std::abs(targetBrightness) > 0.1f || brightnessGainSmoother_.isSmoothing())
+        {
+            for (int channel = 0; channel < totalNumInputChannels && channel < 2; ++channel)
+            {
+                auto* channelData = buffer.getWritePointer(channel);
+
+                for (int i = 0; i < numSamples; ++i)
+                {
+                    channelData[i] = brightnessFilters_[channel].processSample(channelData[i]);
+                }
+            }
+        }
+    }
+
     // Update level meters for UI (simple RMS calculation on first channel)
     if (totalNumInputChannels > 0 && numSamples > 0)
     {
@@ -483,4 +543,19 @@ int UnravelAudioProcessor::getNumBins() const noexcept
         return channelProcessors[0]->getNumBins();
     }
     return 0;
+}
+
+void UnravelAudioProcessor::updateBrightnessCoefficients(double sampleRate, float gainDb)
+{
+    auto coeffs = juce::dsp::IIR::Coefficients<float>::makeHighShelf(
+        sampleRate,
+        kBrightnessFrequency,
+        kBrightnessQ,
+        juce::Decibels::decibelsToGain(gainDb)
+    );
+
+    for (auto& filter : brightnessFilters_)
+    {
+        *filter.coefficients = *coeffs;
+    }
 }

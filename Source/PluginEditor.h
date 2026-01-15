@@ -36,12 +36,15 @@ private:
     juce::Slider separationKnob;
     juce::Slider focusKnob;
     juce::Slider floorKnob;
+    juce::Slider brightnessKnob;
     juce::Label separationLabel;
     juce::Label focusLabel;
     juce::Label floorLabel;
+    juce::Label brightnessLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> separationAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> focusAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> floorAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> brightnessAttachment;
 
     // Solo/Mute controls
     juce::TextButton soloTonalButton;
@@ -67,7 +70,8 @@ private:
     float noiseLevel = 0.0f;
 
     // Tooltip window (required for tooltips to display)
-    juce::TooltipWindow tooltipWindow{this, 500};
+    // 300ms delay for faster feedback (accessibility improvement)
+    juce::TooltipWindow tooltipWindow{this, 300};
 
     // UI Constants
     static constexpr int defaultWidth = 520;
@@ -80,7 +84,7 @@ private:
     juce::Colour accent{0xff00d4aa};
     juce::Colour tonalColor{0xff3388ff};
     juce::Colour noiseColor{0xffff8844};
-    juce::Colour textDim{0xff666666};
+    juce::Colour textDim{0xff888888};  // Improved contrast for accessibility
     juce::Colour textBright{0xffcccccc};
 
     // Helper methods

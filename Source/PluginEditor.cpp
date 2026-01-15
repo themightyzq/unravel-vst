@@ -8,7 +8,8 @@ UnravelAudioProcessorEditor::UnravelAudioProcessorEditor(UnravelAudioProcessor& 
     // XY Pad - main control
     xyPad = std::make_unique<XYPad>(audioProcessor.getAPVTS());
     xyPad->setTooltip("Mix Control: Drag to blend between Tonal (horizontal) and Noise (vertical) components. "
-                      "Bottom-left = silence, Top-right = full mix of both.");
+                      "Bottom-left = silence, Top-right = full mix of both. "
+                      "Scroll to zoom, double-click to reset. Arrow keys for fine adjustment, Home to reset to 0dB.");
     addAndMakeVisible(xyPad.get());
 
     // Spectrum Display
@@ -140,6 +141,10 @@ void UnravelAudioProcessorEditor::setupKnobs()
               "Noise Floor: Cleans up quiet residue in each component. "
               "Zero = natural sound. Higher = harder cutoff, more isolation but less natural.",
               juce::Colour(0xffff6644));
+    setupKnob(brightnessKnob, brightnessLabel, "BRIGHT",
+              "Brightness: High shelf filter for adjusting treble after separation. "
+              "Negative = darker, Positive = brighter. Zero = no change.",
+              juce::Colour(0xffffcc44));
 
     separationAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         audioProcessor.getAPVTS(), ParameterIDs::separation, separationKnob);
@@ -147,6 +152,8 @@ void UnravelAudioProcessorEditor::setupKnobs()
         audioProcessor.getAPVTS(), ParameterIDs::focus, focusKnob);
     floorAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         audioProcessor.getAPVTS(), ParameterIDs::spectralFloor, floorKnob);
+    brightnessAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.getAPVTS(), ParameterIDs::brightness, brightnessKnob);
 }
 
 void UnravelAudioProcessorEditor::setupSoloMute()
@@ -315,11 +322,11 @@ void UnravelAudioProcessorEditor::resized()
     auto header = bounds.removeFromTop(headerHeight).reduced(padding, 0);
     titleLabel.setBounds(header.removeFromLeft(90).withTrimmedTop(10));
 
-    // Right side: Bypass + HQ + DBG buttons
-    auto headerRight = header.removeFromRight(180);
-    debugButton.setBounds(headerRight.removeFromRight(45).reduced(4, 10));
-    qualityButton.setBounds(headerRight.removeFromRight(45).reduced(4, 10));
-    bypassButton.setBounds(headerRight.reduced(4, 10));
+    // Right side: Bypass + HQ + DBG buttons (standardized 48x28)
+    auto headerRight = header.removeFromRight(168);
+    debugButton.setBounds(headerRight.removeFromRight(48).reduced(2, 8));
+    qualityButton.setBounds(headerRight.removeFromRight(48).reduced(2, 8));
+    bypassButton.setBounds(headerRight.removeFromRight(48).reduced(2, 8));
 
     // Center: Preset dropdown
     auto presetArea = header.reduced(20, 8);
@@ -333,27 +340,27 @@ void UnravelAudioProcessorEditor::resized()
     // === FOOTER BAR (Solo/Mute + Scale Toggle) ===
     auto footerBar = bounds.removeFromBottom(soloMuteHeight).reduced(padding, 6);
 
-    // Scale toggle on the right
-    scaleToggleButton.setBounds(footerBar.removeFromRight(45).reduced(2, 6));
+    // Scale toggle on the right (standardized 48x28)
+    scaleToggleButton.setBounds(footerBar.removeFromRight(48).reduced(0, 5));
 
-    // Tonal group (label + solo + mute) on the left
+    // Tonal group (label + solo + mute) - Solo/Mute are 52x28
     auto tonalGroup = footerBar.removeFromLeft(160);
     tonalLabel.setBounds(tonalGroup.removeFromLeft(50).reduced(0, 8));
-    soloTonalButton.setBounds(tonalGroup.removeFromLeft(52).reduced(2, 6));
-    muteTonalButton.setBounds(tonalGroup.removeFromLeft(52).reduced(2, 6));
+    soloTonalButton.setBounds(tonalGroup.removeFromLeft(52).reduced(0, 5));
+    muteTonalButton.setBounds(tonalGroup.removeFromLeft(52).reduced(0, 5));
 
     // Small gap
     footerBar.removeFromLeft(10);
 
-    // Noise group (label + solo + mute)
+    // Noise group (label + solo + mute) - Solo/Mute are 52x28
     auto noiseGroup = footerBar.removeFromLeft(160);
     noiseLabel.setBounds(noiseGroup.removeFromLeft(50).reduced(0, 8));
-    soloNoiseButton.setBounds(noiseGroup.removeFromLeft(52).reduced(2, 6));
-    muteNoiseButton.setBounds(noiseGroup.removeFromLeft(52).reduced(2, 6));
+    soloNoiseButton.setBounds(noiseGroup.removeFromLeft(52).reduced(0, 5));
+    muteNoiseButton.setBounds(noiseGroup.removeFromLeft(52).reduced(0, 5));
 
     // === KNOB AREA ===
     auto knobArea = bounds.removeFromBottom(knobAreaHeight).reduced(padding, 4);
-    int knobWidth = knobArea.getWidth() / 3;
+    int knobWidth = knobArea.getWidth() / 4;
 
     auto sepArea = knobArea.removeFromLeft(knobWidth);
     separationLabel.setBounds(sepArea.removeFromTop(16));
@@ -363,9 +370,13 @@ void UnravelAudioProcessorEditor::resized()
     focusLabel.setBounds(focusArea.removeFromTop(16));
     focusKnob.setBounds(focusArea.reduced(4, 0));
 
-    auto floorArea = knobArea;
+    auto floorArea = knobArea.removeFromLeft(knobWidth);
     floorLabel.setBounds(floorArea.removeFromTop(16));
     floorKnob.setBounds(floorArea.reduced(4, 0));
+
+    auto brightArea = knobArea;
+    brightnessLabel.setBounds(brightArea.removeFromTop(16));
+    brightnessKnob.setBounds(brightArea.reduced(4, 0));
 
     // === XY PAD (remaining space) ===
     bounds = bounds.reduced(padding);

@@ -25,4 +25,7 @@ namespace ParameterIDs
 
     // Debug control
     const juce::String debugPassthrough = "debugPassthrough";  // Skip mask estimation for debugging STFT
+
+    // Post-processing
+    const juce::String brightness = "brightness";             // High shelf filter for treble adjustment
 }
