@@ -111,7 +111,7 @@ void HPSSProcessor::processBlock(const float* inputBuffer,
     {
         // Unity gain path taken - copy to optional outputs if needed
         if (tonalBuffer)
-            std::copy_n(inputBuffer, numSamples, tonalBuffer);
+            juce::FloatVectorOperations::copy(tonalBuffer, inputBuffer, numSamples);
         if (noiseBuffer)
             std::fill_n(noiseBuffer, numSamples, 0.0f);
         
@@ -218,7 +218,7 @@ void HPSSProcessor::processBlock(const float* inputBuffer,
         {
             // Apply only tonal gain for tonal output
             // (This is a simplified implementation)
-            std::copy_n(outputBuffer, numSamples, tonalBuffer);
+            juce::FloatVectorOperations::copy(tonalBuffer, outputBuffer, numSamples);
             
             const float tonalOnlyGain = tonalGainSmoother_.getCurrentValue();
             for (int i = 0; i < numSamples; ++i)
@@ -231,7 +231,7 @@ void HPSSProcessor::processBlock(const float* inputBuffer,
         {
             // Apply only noise gain for noise output
             // (This is a simplified implementation)
-            std::copy_n(outputBuffer, numSamples, noiseBuffer);
+            juce::FloatVectorOperations::copy(noiseBuffer, outputBuffer, numSamples);
             
             const float noiseOnlyGain = noiseGainSmoother_.getCurrentValue();
             for (int i = 0; i < numSamples; ++i)

@@ -214,9 +214,8 @@ void MagPhaseFrame::complexToMagPhase(std::complex<float> complex,
     const float real = complex.real();
     const float imag = complex.imag();
     
-    // Calculate magnitude using optimized sqrt
-    // Using std::hypot for better numerical stability
-    outMagnitude = std::hypot(real, imag);
+    // Calculate magnitude - sqrt(r^2 + i^2) is safe for normalized audio
+    outMagnitude = std::sqrt(real * real + imag * imag);
     
     // Calculate phase with proper handling of edge cases
     if (outMagnitude > kEpsilon)

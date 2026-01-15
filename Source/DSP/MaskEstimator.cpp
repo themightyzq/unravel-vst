@@ -83,7 +83,7 @@ void MaskEstimator::updateGuides(juce::Span<const float> magnitudes) noexcept
     // Write current frame to ring buffer at write index position
     // This overwrites the oldest frame - NO allocations!
     float* writePosition = magnitudeHistoryData.data() + (historyWriteIndex * numBins);
-    std::copy(magnitudes.begin(), magnitudes.end(), writePosition);
+    juce::FloatVectorOperations::copy(writePosition, magnitudes.data(), numBins);
 
     // Advance write index (wrap around)
     historyWriteIndex = (historyWriteIndex + 1) % horizontalMedianSize;
@@ -107,7 +107,7 @@ void MaskEstimator::updateStats(juce::Span<const float> magnitudes) noexcept
     computeSpectralFlatness();
     
     // Store current magnitudes for next frame
-    std::copy(magnitudes.begin(), magnitudes.end(), previousMagnitudes.begin());
+    juce::FloatVectorOperations::copy(previousMagnitudes.data(), magnitudes.data(), numBins);
 }
 
 void MaskEstimator::computeMasks(juce::Span<float> tonalMask, juce::Span<float> noiseMask) noexcept
@@ -207,7 +207,7 @@ void MaskEstimator::computeMasks(juce::Span<float> tonalMask, juce::Span<float> 
     applySpectralFloor();
 
     // Copy results to output spans
-    std::copy(smoothedMask.begin(), smoothedMask.end(), tonalMask.begin());
+    juce::FloatVectorOperations::copy(tonalMask.data(), smoothedMask.data(), numBins);
 
     // Compute noise mask as complement
     for (int i = 0; i < numBins; ++i)
@@ -216,7 +216,7 @@ void MaskEstimator::computeMasks(juce::Span<float> tonalMask, juce::Span<float> 
     }
 
     // Store smoothed mask for next frame
-    std::copy(smoothedMask.begin(), smoothedMask.end(), previousSmoothedMask.begin());
+    juce::FloatVectorOperations::copy(previousSmoothedMask.data(), smoothedMask.data(), numBins);
 }
 
 void MaskEstimator::computeHorizontalMedian() noexcept
@@ -411,7 +411,7 @@ void MaskEstimator::applySpectralFloor() noexcept
 void MaskEstimator::applyFrequencyBlur() noexcept
 {
     // Light frequency blur (±1 bin) with Gaussian-like weighting
-    std::copy(smoothedMask.begin(), smoothedMask.end(), tempBuffer.begin());
+    juce::FloatVectorOperations::copy(tempBuffer.data(), smoothedMask.data(), numBins);
     
     for (int i = 0; i < numBins; ++i)
     {
