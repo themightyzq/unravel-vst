@@ -2,14 +2,14 @@
 
 **Spectral Decomposition Plugin for Tonal/Noise Separation**
 
-![Unravel Plugin Interface](assets/screenshot.png)
+![Unravel Plugin Interface](assets/screenshot.png?v=1.1.0)
 
 Unravel is a professional audio plugin that separates tonal (harmonic) and noise (stochastic) components in audio using HPSS (Harmonic-Percussive Source Separation) algorithms.
 
 ## Features
 
 - **Real-time Tonal/Noise Separation** - Isolate harmonics from noise in any audio
-- **XY Pad Control** - Intuitive 2D interface for blending components
+- **XY Pad Control** - Intuitive 2D interface with zoom and pan for precise adjustments
 - **Spectrum Visualization** - Real-time display with LOG/LIN frequency scaling
 - **Sound Design Presets** - Quick access to common separation settings
 - **Solo/Mute Controls** - Audition tonal or noise components independently
@@ -50,7 +50,10 @@ The VST3 plugin will be in `build/Unravel_artefacts/Release/VST3/`
 2. Use the **XY Pad** to control the mix:
    - **X-axis**: Tonal gain (harmonic content)
    - **Y-axis**: Noise gain (textural content)
-3. Adjust **Separation**, **Focus**, and **Floor** for fine-tuning
+   - **Scroll wheel**: Zoom in for fine control (up to 10x)
+   - **Middle-click + drag**: Pan around when zoomed
+   - **Minimap**: Click to navigate quickly when zoomed
+3. Adjust **Separation**, **Focus**, **Floor**, and **Brightness** for fine-tuning
 
 ### Parameters
 
@@ -61,7 +64,16 @@ The VST3 plugin will be in `build/Unravel_artefacts/Release/VST3/`
 | **Separation** | Strength of tonal/noise split (0-100%) |
 | **Focus** | Bias toward tonal (-100) or noise (+100) |
 | **Floor** | Spectral floor threshold for extreme isolation |
-| **Quality** | Toggle between Low Latency and High Quality modes |
+| **Brightness** | High-frequency shelf EQ for tonal shaping (-12dB to +12dB) |
+| **HQ** | Toggle High Quality mode (better separation, higher latency) |
+
+### Keyboard Shortcuts (XY Pad)
+
+| Key | Action |
+|-----|--------|
+| Arrow keys | Nudge position |
+| Home | Reset to 0dB (center) |
+| Scroll wheel | Zoom in/out |
 
 ### Use Cases
 
@@ -73,8 +85,8 @@ The VST3 plugin will be in `build/Unravel_artefacts/Release/VST3/`
 ## Compatibility
 
 - **Format**: VST3
-- **Platforms**: macOS 10.13+, Windows 10+, Linux
-- **DAWs**: Logic Pro, Ableton Live, Pro Tools, Cubase, Reaper, FL Studio, and more
+- **Platforms**: macOS 10.13+ (Universal Binary), Windows 10+, Linux
+- **DAWs**: Logic Pro, Ableton Live, Pro Tools, Cubase, Reaper, FL Studio, Soundminer, and more
 - **Sample Rates**: 44.1kHz - 192kHz
 
 ## License
