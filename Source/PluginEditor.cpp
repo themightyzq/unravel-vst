@@ -312,6 +312,14 @@ void UnravelAudioProcessorEditor::loadPreset(float tonalDb, float noiseDb, float
     setParam(ParameterIDs::muteNoise,     0.0f);
     setParam(ParameterIDs::muteTransient, 0.0f);
     setParam(ParameterIDs::bypass,        0.0f);
+
+    // Request the audio thread to snap smoothers and reset the brightness IIR
+    // history on the next processBlock, so playback continuing across this
+    // preset switch starts from the new state instead of ramping into it
+    // over 20 ms (audible swoosh on brightness, click on gains at large
+    // jumps). The request is picked up within a single audio block, well
+    // under the 20 ms ramp it suppresses. See REVIEW-AUDIO.md C7.
+    audioProcessor.requestParameterStateSnap();
 }
 
 void UnravelAudioProcessorEditor::paint(juce::Graphics& g)

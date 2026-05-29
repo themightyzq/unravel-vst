@@ -345,6 +345,17 @@ void HPSSProcessor::updateParameterSmoothing(float tonalGain, float noiseGain, f
     transientGainSmoother_.setTargetValue(transientGain);
 }
 
+void HPSSProcessor::snapGainSmoothers(float tonalGain, float noiseGain, float transientGain) noexcept
+{
+    // Pin each smoother to the target — current = target — so the next
+    // processBlock starts at the new gain without a 20 ms ramp.
+    // setCurrentAndTargetValue writes the smoother's three scalar fields
+    // (currentValue, target, countdown) directly; no allocation, no locks.
+    tonalGainSmoother_.setCurrentAndTargetValue(tonalGain);
+    noiseGainSmoother_.setCurrentAndTargetValue(noiseGain);
+    transientGainSmoother_.setCurrentAndTargetValue(transientGain);
+}
+
 void HPSSProcessor::applySafetyLimiting(float* buffer, int numSamples) noexcept
 {
     for (int i = 0; i < numSamples; ++i)

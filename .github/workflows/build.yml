@@ -60,12 +60,49 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel 4
 
+      - name: Verify Universal Binary (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -e
+          for bundle in \
+              build/Unravel_artefacts/Release/VST3/Unravel.vst3/Contents/MacOS/Unravel \
+              build/Unravel_artefacts/Release/AU/Unravel.component/Contents/MacOS/Unravel \
+              build/Unravel_artefacts/Release/Standalone/Unravel.app/Contents/MacOS/Unravel; do
+            archs=$(lipo -archs "$bundle")
+            echo "$bundle: $archs"
+            echo "$archs" | grep -qE "(x86_64.*arm64|arm64.*x86_64)" \
+              || { echo "ERROR: $bundle is not Universal (arm64 + x86_64)"; exit 1; }
+          done
+
+      - name: Ad-hoc codesign (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          # Ad-hoc signing — no Apple Developer ID, no notarization. Users
+          # still need to clear quarantine on first install
+          # (`xattr -dr com.apple.quarantine <bundle>`). Ad-hoc signing
+          # reduces "damaged" false-positives on macOS 14+ and is required
+          # for arm64 JIT mmap paths some JUCE modules can hit.
+          #
+          # --deep is deprecated by Apple; VST3 / AU / Standalone bundles
+          # here have no nested helpers so signing the top bundle is enough.
+          # --timestamp=none skips the timestamp server (not available /
+          # not meaningful for ad-hoc signs).
+          for bundle in \
+              build/Unravel_artefacts/Release/VST3/Unravel.vst3 \
+              build/Unravel_artefacts/Release/AU/Unravel.component \
+              build/Unravel_artefacts/Release/Standalone/Unravel.app; do
+            codesign --force --sign - --timestamp=none "$bundle"
+            codesign --verify --verbose "$bundle"
+          done
+
       - name: Package (macOS)
         if: runner.os == 'macOS'
         run: |
+          # Use ditto rather than cp -r so xattrs (including the just-applied
+          # ad-hoc signature) survive the zip step that upload-artifact does.
           mkdir -p release
-          cp -r build/Unravel_artefacts/Release/VST3/Unravel.vst3 release/
-          cp -r build/Unravel_artefacts/Release/AU/Unravel.component release/
+          ditto build/Unravel_artefacts/Release/VST3/Unravel.vst3 release/Unravel.vst3
+          ditto build/Unravel_artefacts/Release/AU/Unravel.component release/Unravel.component
 
       - name: Package (Windows)
         if: runner.os == 'Windows'

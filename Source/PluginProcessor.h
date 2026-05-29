@@ -18,6 +18,16 @@ public:
 
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
 
+    // Host bypass virtual. JUCE's default zeros output channels beyond the
+    // input count and does NOT route through any compensating delay. With
+    // ~32 ms of reported PDC latency (fftSize - hopSize = 1536 samples), the
+    // default would put the bypassed track 1536 samples early relative to
+    // parallel routes, breaking phase alignment. Route through the in-plugin
+    // bypass path (HPSSProcessor::processBypass) so the delay buffer keeps
+    // the bypassed signal aligned with what other plugins on parallel sends
+    // produce. See REVIEW-AUDIO.md C3.
+    void processBlockBypassed (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override;
 
@@ -40,6 +50,23 @@ public:
     
     juce::AudioProcessorValueTreeState& getAPVTS() { return apvts; }
 
+    // Request the audio thread to snap all parameter smoothers and reset the
+    // brightness IIR history to match current APVTS values on the next
+    // processBlock, rather than ramping over 20 ms. Call after a host state
+    // load or a UI preset switch so playback resuming after the change
+    // doesn't swoosh up to the new brightness/gain values or bleed pre-load
+    // IIR history into the new tone.
+    //
+    // Implemented as an atomic request flag picked up by the audio thread,
+    // because juce::SmoothedValue and juce::dsp::IIR::Filter::reset() are
+    // NOT safe to mutate from the message thread while processBlock runs
+    // concurrently (filter reset can reach a conditional allocation if the
+    // filter's order changed, and the smoothers' fields are plain
+    // non-atomic). The snap is applied within ~one block (≪ 20 ms, less
+    // than the smoother ramp it suppresses). See REVIEW-AUDIO.md C7 and the
+    // 2026-05-29 code-reviewer pass.
+    void requestParameterStateSnap() noexcept;
+
 private:
     juce::AudioProcessorValueTreeState apvts;
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
@@ -50,10 +77,13 @@ private:
     // Per-channel HPSS processor
     std::vector<std::unique_ptr<HPSSProcessor>> channelProcessors;
 
-    // Parameter smoothers for gain controls
-    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> tonalGainSmoothed;
-    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> noisyGainSmoothed;
-    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> transientGainSmoothed;
+    // The real per-stream gain smoothers live INSIDE HPSSProcessor
+    // (tonalGainSmoother_ / noiseGainSmoother_ / transientGainSmoother_),
+    // advanced per-frame inside its processBlock(). Earlier revisions also
+    // carried three SmoothedValue members here with the same names; those
+    // were dead state — written via setTargetValue() but never read — and
+    // misled the original C7 snap fix into snapping the wrong smoothers.
+    // Removed in v1.3.1.
 
     // Current parameter values (updated once per block)
     float currentTonalGain = 1.0f;
@@ -91,6 +121,18 @@ private:
     void updateParameters() noexcept;
     void rebuildBrightnessTable(double sampleRate);
     int brightnessTableIndex(float gainDb) const noexcept;
+
+    // Audio-thread side of the message-thread snap request. Picks up
+    // snapRequested_ in processBlock and applies the snap to smoothers and
+    // brightness IIR state in the audio thread, so the work is RT-safe and
+    // can't race processBlock's reads.
+    void applyParameterStateSnapOnAudioThread() noexcept;
+
+    // Message-thread → audio-thread snap request. release on the writer side
+    // pairs with acquire on the audio-thread exchange in processBlock so the
+    // new APVTS values (already published via replaceState) are visible to
+    // the snap path.
+    std::atomic<bool> snapRequested_ { false };
 
     // Spectrum snapshot (seqlock: single audio-thread writer, single UI-thread reader).
     // Even sequence = stable, odd = write in progress. Writer is wait-free (two atomic

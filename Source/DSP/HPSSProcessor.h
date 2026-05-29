@@ -100,6 +100,15 @@ public:
                      float noiseGain,
                      float transientGain) noexcept;
 
+    /**
+     * Snap the three internal gain smoothers to the supplied target values
+     * immediately (current = target, no ramp). Call after a host state load
+     * or UI preset switch so the next processBlock starts at the new gains
+     * instead of ramping over 20 ms. RT-safe: only writes the smoothers'
+     * scalar fields.
+     */
+    void snapGainSmoothers(float tonalGain, float noiseGain, float transientGain) noexcept;
+
     // === Latency and Performance Queries ===
     
     /**
