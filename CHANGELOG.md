@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed (post-`dsp-debugger` audit)
+
+- **`MaskEstimator::computeMasks` post-processing order corrected: floor now runs before blur.** A `dsp-debugger` agent trace of a representative pitched-modulated drone bin under the spectralFloor-coupling change found that the previous order `[smoothing → blur → floor]` had a stable fixed point at `tonalMask ≈ 0.077` for narrow-band tones at `spectralFloor = 1.0`. The blur (center weight 0.5, neighbours near 0 because they're noise) cut a peak's mask from 0.994 to ~0.5, the floor's cubic-ease at `mask < ceilingLevel = 0.5` then pushed it *toward 0*, and prev-frame feedback through asymmetric smoothing settled the collapse. Net audible: at the "fully noise" pad corner, a drone bin was being *amplified by +10.4 dB* (drone going to the noise stream, then receiving the +12 dB noise gain), worse than no coupling at all (+7.6 dB).
+- **`applyFrequencyBlur` strength now scales with `(1 − spectralFloorThreshold)`.** At full isolation (threshold = 1.0) blur is fully bypassed, preserving the binarising decisions just made by `applySpectralFloor`. At default (threshold = 0) the blur is unchanged; intermediate values cross-fade smoothly. Together with the order swap above, a narrow-band drone bin's mask is predicted to attenuate by approximately −33 dB at the fully-noise corner instead of being amplified.
+
+The spectralFloor → XY-pad coupling itself (added below) is unchanged; the corrections are entirely in how `MaskEstimator` processes the mask after the corner-coupled floor value arrives.
+
+---
+
 Follow-up to the v1.3.1 audit-fix pass, addressing user feedback that "fully noise" on a pitched modulated source (drone-style content) wasn't silencing tonality. The root cause is structural: soft-mask × per-stream-gain mathematically tops out at about −14 dB attenuation on bins dominated by the other stream, so the pad corners couldn't reach isolation regardless of how the masks were classified. Adds an architectural coupling that translates pad asymmetry into spectral-floor lift (mask binarisation at the corners) and reverts two unvalidated DSP changes from the v1.3.1 series.
 
 ### Fixed
