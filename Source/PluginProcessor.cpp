@@ -110,7 +110,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout UnravelAudioProcessor::creat
         ParameterIDs::separation,
         "Separation",
         juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
-        75.0f, // Default: 75% separation
+        85.0f, // Default: 85% separation — high enough that dragging the XY
+               // pad to a corner produces an obvious isolation effect on
+               // first use (the previous 75% was gentle enough that the
+               // pad alone felt weak vs the Extract presets at 90%). Still
+               // below the Extract presets so they retain their character.
         "%",
         juce::AudioProcessorParameter::genericParameter,
         [](float value, int) { return juce::String(static_cast<int>(value)) + "%"; }

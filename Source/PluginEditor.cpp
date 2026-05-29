@@ -265,7 +265,7 @@ void UnravelAudioProcessorEditor::setupPresets()
         // a sustained stream means you don't want drum hits / plosives leaking through.
         switch (presetSelector.getSelectedId())
         {
-            case 1: loadPreset(0.0f,    0.0f,   0.0f, 75.0f,   0.0f, 0.0f,  0.0f); break; // Default (neutral, all streams pass)
+            case 1: loadPreset(0.0f,    0.0f,   0.0f, 85.0f,   0.0f, 0.0f,  0.0f); break; // Default (neutral, all streams pass) — separation matches v1.3.1's new default
             case 2: loadPreset(0.0f,  -60.0f, -60.0f, 90.0f, -50.0f, 30.0f, 0.0f); break; // Extract Tonal — mute noise + transient
             case 3: loadPreset(-60.0f,  0.0f, -60.0f, 90.0f,  50.0f, 30.0f, 0.0f); break; // Extract Noise — mute tonal + transient
             case 4: loadPreset(0.0f,    0.0f,   0.0f, 40.0f,   0.0f, 0.0f,  0.0f); break; // Gentle (all streams pass, soft separation)
