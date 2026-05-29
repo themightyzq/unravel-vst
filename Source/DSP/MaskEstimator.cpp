@@ -338,20 +338,45 @@ void MaskEstimator::computeVerticalMedian() noexcept
 
 void MaskEstimator::computeSpectralFlux() noexcept
 {
-    // Spectral flux: frame-to-frame magnitude change |mag[n] - mag[n-1]|
+    // Per-bin deviation from the running typical level, used to discriminate
+    // real onsets from steady (possibly modulated) tonal content.
+    //
+    // Previously this measured |mag[n] - mag[n-1]|, but that conflates two
+    // very different things on pitched material:
+    //   - amplitude / tremolo modulation (tonal: ±30 % swings at a few Hz
+    //     are normal for vibratoed sustains, hums with audible buzz, drones)
+    //   - true onsets and stochastic content (genuinely transient/noisy)
+    // The flux penalty in computeMasks then trimmed tonalPower at every
+    // modulated harmonic, propagating into the Wiener mask and the three-
+    // stream split — so a clearly-pitched modulated source (lightsaber-
+    // style hums, sustained synth pads with chorus) routed perceived
+    // "drone" energy into the Noise stream. At the XY pad's "fully noise"
+    // corner that energy then got +12 dB amplification, leaving the
+    // tonality audible instead of silenced.
+    //
+    // Detrending against horizontalGuide[i] (the median over the last
+    // horizontalMedianSize frames at this bin) fixes that: AM modulation
+    // averages to the median (zero net deviation), while a real onset
+    // jumps above the median in one frame and registers as flux. The
+    // median lags by ~half the window (~50 ms at hop 512 / 48 kHz), but
+    // onsets resolve within 1-2 frames — well inside the responsive
+    // region for transientEnv's attack of 0.8.
+    //
+    // updateGuides() runs before updateStats() in HPSSProcessor::processBlock,
+    // so horizontalGuide is current.
     const float* currentMagnitudes = getCurrentFrame();
 
     for (int i = 0; i < numBins; ++i)
     {
         const float currentMag = currentMagnitudes[i];
-        const float prevMag = previousMagnitudes[i];
-        const float magChange = std::abs(currentMag - prevMag);
+        const float typicalMag = horizontalGuide[i];
+        const float magDeviation = std::abs(currentMag - typicalMag);
 
-        // Normalize by local energy to get relative change
-        const float localEnergy = std::max(currentMag, prevMag);
+        // Normalize by local energy to get relative deviation
+        const float localEnergy = std::max(currentMag, typicalMag);
         if (localEnergy > eps)
         {
-            spectralFlux[i] = clamp01(magChange / localEnergy);
+            spectralFlux[i] = clamp01(magDeviation / localEnergy);
         }
         else
         {
