@@ -64,10 +64,14 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           set -e
+          # Standalone path is overridden via RUNTIME_OUTPUT_DIRECTORY in
+          # CMakeLists.txt — it lands under build/bin/, NOT under
+          # build/Unravel_artefacts/Release/Standalone where JUCE would
+          # otherwise place it.
           for bundle in \
               build/Unravel_artefacts/Release/VST3/Unravel.vst3/Contents/MacOS/Unravel \
               build/Unravel_artefacts/Release/AU/Unravel.component/Contents/MacOS/Unravel \
-              build/Unravel_artefacts/Release/Standalone/Unravel.app/Contents/MacOS/Unravel; do
+              build/bin/Standalone/Unravel.app/Contents/MacOS/Unravel; do
             archs=$(lipo -archs "$bundle")
             echo "$bundle: $archs"
             echo "$archs" | grep -qE "(x86_64.*arm64|arm64.*x86_64)" \
@@ -90,7 +94,7 @@ jobs:
           for bundle in \
               build/Unravel_artefacts/Release/VST3/Unravel.vst3 \
               build/Unravel_artefacts/Release/AU/Unravel.component \
-              build/Unravel_artefacts/Release/Standalone/Unravel.app; do
+              build/bin/Standalone/Unravel.app; do
             codesign --force --sign - --timestamp=none "$bundle"
             codesign --verify --verbose "$bundle"
           done
