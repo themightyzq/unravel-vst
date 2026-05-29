@@ -195,11 +195,21 @@ void MaskEstimator::computeMasks(juce::Span<float> tonalMask,
     // Fast attack preserves transients, slow release reduces pumping
     applyAsymmetricSmoothing();
 
-    // Light frequency smoothing to reduce spectral artifacts
-    applyFrequencyBlur();
-
-    // Apply spectral floor for extreme isolation (if enabled)
+    // Apply spectral floor BEFORE frequency blur. At high threshold the floor
+    // pushes a narrow peak's mask up toward 1.0; doing this before the blur
+    // means the blur smears a "1.0" peak (mild effect), not a borderline 0.5
+    // value (which the floor would otherwise push the wrong direction).
+    // Swap was a bug found by dsp-debugger pass against the previous order
+    // [smoothing → blur → floor], which created a stable fixed point ~0.077
+    // for narrow-band tones with spectralFloor at 1.0.
     applySpectralFloor();
+
+    // Light frequency smoothing to reduce spectral artifacts. Blur strength
+    // is scaled by (1 − spectralFloorThreshold) so it disappears at full
+    // isolation — at threshold=1.0 the floor's per-bin decisions must be
+    // preserved exactly, or a narrow peak's blurred value drops back below
+    // the binarisation threshold and the floor's work is undone.
+    applyFrequencyBlur();
 
     // Three-stream split (mass-conserving: tonal + transient + noise = 1 per bin).
     //
@@ -413,14 +423,25 @@ void MaskEstimator::applySpectralFloor() noexcept
 
 void MaskEstimator::applyFrequencyBlur() noexcept
 {
-    // Light frequency blur (±1 bin) with Gaussian-like weighting
+    // Light frequency blur (±1 bin) with Gaussian-like weighting.
+    //
+    // Blur strength is mixed against the un-blurred mask in proportion to
+    // (1 − spectralFloorThreshold) so that:
+    //   - threshold = 0 (default): full blur — softens narrow artifacts
+    //   - threshold = 1 (corner isolation): no blur — preserves the binary
+    //     decisions made by applySpectralFloor immediately upstream.
+    // Anything in between is a smooth mix.
     juce::FloatVectorOperations::copy(tempBuffer.data(), smoothedMask.data(), numBins);
-    
+
+    const float blurMix = 1.0f - juce::jlimit(0.0f, 1.0f, spectralFloorThreshold);
+    if (blurMix <= eps)
+        return;  // No blur to apply; smoothedMask already holds the unblurred values.
+
     for (int i = 0; i < numBins; ++i)
     {
         float weightedSum = 0.0f;
         float totalWeight = 0.0f;
-        
+
         for (int j = -blurRadius; j <= blurRadius; ++j)
         {
             const int neighborBin = i + j;
@@ -432,10 +453,11 @@ void MaskEstimator::applyFrequencyBlur() noexcept
                 totalWeight += weight;
             }
         }
-        
+
         if (totalWeight > eps)
         {
-            smoothedMask[i] = weightedSum / totalWeight;
+            const float blurred = weightedSum / totalWeight;
+            smoothedMask[i] = blurMix * blurred + (1.0f - blurMix) * tempBuffer[i];
         }
     }
 }
