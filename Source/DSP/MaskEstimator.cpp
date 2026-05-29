@@ -161,23 +161,14 @@ void MaskEstimator::computeMasks(juce::Span<float> tonalMask,
         // Enhance discrimination using spectral features:
         // - High spectral flux indicates transient/noise content
         // - High spectral flatness indicates noise-like content
-        //
-        // Multipliers tuned (0.7→0.3 on flux→tonal; 0.5→0.15 on flux→noise) so
-        // modulated tonal sources — drones with vibrato, hums with buzz, lightsaber-
-        // style hums where each per-bin envelope wobbles ~5–10 Hz — stay
-        // classified as tonal. The previous multipliers over-attributed those
-        // sources to noise, making the XY pad's "fully noise" corner FAIL to
-        // silence them (you'd get +1 dB instead of −20 dB on the drone bin).
-        // Flatness penalty unchanged — narrow-band drones have low flatness
-        // anyway, so it's a non-issue for the modulated-tonal case.
-        const float fluxPenalty = spectralFlux[i] * 0.3f;      // was 0.7f
+        const float fluxPenalty = spectralFlux[i] * 0.7f;      // Penalize tonal if high flux
         const float flatnessPenalty = spectralFlatness[i] * 0.5f;  // Penalize tonal if flat
 
         // Apply penalties to tonal power estimate (clamp to avoid going negative)
         tonalPower *= std::max(0.01f, (1.0f - fluxPenalty) * (1.0f - flatnessPenalty));
 
         // Boost noise power estimate based on same features
-        noisePower *= (1.0f + fluxPenalty * 0.15f) * (1.0f + flatnessPenalty * 0.5f);  // was 0.5f
+        noisePower *= (1.0f + fluxPenalty * 0.5f) * (1.0f + flatnessPenalty * 0.5f);
 
         // Apply focus bias to shift detection threshold
         // focusBias: -1 = favor tonal detection, +1 = favor noise detection
@@ -262,18 +253,14 @@ void MaskEstimator::computeMasks(juce::Span<float> tonalMask,
     // the operation is a no-op. The further from balance, the more
     // decisive the bin becomes.
     //
-    // Exponent 4.0 is decisive — together with the relaxed flux penalty
-    // above, a modulated-drone bin's mask pushes from ~0.5 raw to ~0.93+
-    // tonal after sharpening, so "fully noise" delivers −20 dB or more
-    // attenuation instead of leaking the pitch through. Initial release
-    // shipped exp=2.0 which was insufficient for modulated content where
-    // wienerGain only reaches 0.85–0.9. Trade-off: higher exp can produce
-    // mask-edge artifacts on fast / dense material with bins constantly
-    // hopping between dominant streams; if that becomes audible the right
-    // fix is to make the exponent a runtime parameter (probably linked to
-    // the Separation knob).
+    // Exponent 2.0 is a moderate choice — empirically the tonal mask
+    // for a 0.95 wienerGain drone bin goes from 0.81 → 0.97, and the
+    // noise share drops from ~0.15 → ~0.03. "Fully noise" then
+    // attenuates the drone by ~−27 dB instead of ~−5 dB. Higher
+    // exponents are sharper but risk audible mask-edge artifacts on
+    // dense / fast material.
     {
-        constexpr float sharpenExp = 4.0f;
+        constexpr float sharpenExp = 2.0f;
         constexpr float sharpenFloor = 1.0e-12f;
         for (int i = 0; i < numBins; ++i)
         {
