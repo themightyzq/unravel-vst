@@ -1,0 +1,78 @@
+name: Bug report
+description: Something is broken or behaving unexpectedly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. The more concrete the report, the faster it can be fixed — please include the exact DAW and version, the plugin format you loaded, and the steps that trigger the problem.
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Unravel version
+      description: Shown in your DAW's plugin info pane (or in the standalone's window title).
+      placeholder: "e.g. 1.2.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: format
+    attributes:
+      label: Plugin format
+      options:
+        - VST3
+        - Audio Unit (AU)
+        - Standalone
+        - Multiple / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "e.g. macOS 14.5 (Apple Silicon), Windows 11, Ubuntu 22.04"
+    validations:
+      required: true
+
+  - type: input
+    id: host
+    attributes:
+      label: DAW / host and version
+      placeholder: "e.g. Logic Pro 11.0.1, Ableton Live 12.0.5, Reaper 7.10, Soundminer 6.2"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected to happen
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What actually happened
+      description: Include any error messages from the DAW or system console.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Insert Unravel on a stereo audio track
+        2. Set Separation to 90, Focus to -50
+        3. Play any material with vocals
+        4. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context (optional)
+      description: Sample rate, buffer size, audio sample, screenshot/recording, recent changes — anything that might help.

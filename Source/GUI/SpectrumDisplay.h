@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include <vector>
 #include <functional>
+#include "Theme.h"
 
 /**
  * SpectrumDisplay - Real-time spectral visualization for tonal/noise separation
@@ -24,25 +25,20 @@ class SpectrumDisplay : public juce::Component,
                         private juce::Timer
 {
 public:
-    // Callback types for getting data from processor
-    using MagnitudeCallback = std::function<juce::Span<const float>()>;
-    using MaskCallback = std::function<juce::Span<const float>()>;
-    using NumBinsCallback = std::function<int()>;
+    // Callback that fills the four buffers with a consistent snapshot of the
+    // latest analysis frame (magnitudes + tonal/transient/noise masks). Returns
+    // false if no data is available. The display owns the buffers — it never
+    // reads the processor's live DSP storage.
+    using SnapshotCallback = std::function<bool(std::vector<float>& /* magnitudes */,
+                                                std::vector<float>& /* tonalMask */,
+                                                std::vector<float>& /* transientMask */,
+                                                std::vector<float>& /* noiseMask */)>;
 
     SpectrumDisplay();
     ~SpectrumDisplay() override;
 
-    /**
-     * Set callbacks for retrieving spectrum data.
-     * @param magCallback Callback returning current magnitudes
-     * @param tonalCallback Callback returning current tonal mask
-     * @param noiseCallback Callback returning current noise mask
-     * @param numBinsCallback Callback returning number of frequency bins
-     */
-    void setCallbacks(MagnitudeCallback magCallback,
-                     MaskCallback tonalCallback,
-                     MaskCallback noiseCallback,
-                     NumBinsCallback numBinsCallback);
+    /** Set the callback used to pull a thread-safe spectrum snapshot from the processor. */
+    void setSnapshotCallback(SnapshotCallback cb);
 
     /**
      * Set the sample rate for accurate frequency display.
@@ -68,9 +64,6 @@ public:
      */
     void setEnabled(bool shouldBeEnabled);
 
-    // Mouse interaction for scale toggle
-    void mouseDown(const juce::MouseEvent& e) override;
-
     // Component overrides
     void paint(juce::Graphics& g) override;
     void resized() override;
@@ -79,11 +72,12 @@ private:
     // Timer callback for visual updates
     void timerCallback() override;
 
-    // Data callbacks
-    MagnitudeCallback getMagnitudes;
-    MaskCallback getTonalMask;
-    MaskCallback getNoiseMask;
-    NumBinsCallback getNumBins;
+    // Data callback (thread-safe snapshot) + scratch buffers it fills.
+    SnapshotCallback getSnapshot;
+    std::vector<float> snapMag_;
+    std::vector<float> snapTonal_;
+    std::vector<float> snapTransient_;
+    std::vector<float> snapNoise_;
 
     // Display settings
     static constexpr float minDb = -80.0f;
@@ -93,6 +87,7 @@ private:
     // Cached display data
     std::vector<float> displayMagnitudes;
     std::vector<float> displayTonalMask;
+    std::vector<float> displayTransientMask;
     std::vector<float> displayNoiseMask;
     int cachedNumBins = 0;
 
@@ -101,7 +96,7 @@ private:
 
     // State
     bool isEnabled = true;
-    bool hasValidData = false;
+    bool hasSignal_ = false;   // true once the snapshot carries non-trivial energy
     bool useLogScale = true;  // Default to logarithmic
     double currentSampleRate = 48000.0;
 
@@ -111,25 +106,23 @@ private:
     void drawMasks(juce::Graphics& g);
     void drawLabels(juce::Graphics& g);
     void drawFrequencyLabels(juce::Graphics& g);
-    void drawScaleToggle(juce::Graphics& g);
 
-    // Utility
+    // Utility — a single frequency→x mapping (true log or linear) keeps the
+    // spectrum, the grid lines, and the frequency labels all consistent.
+    float freqToX(float freq, float width) const;
     float binToX(int bin, int totalBins, float width) const;
-    float xToBin(float x, int totalBins, float width) const;
     float dbToY(float db, float height) const;
     float magnitudeToDb(float magnitude) const;
     float binToFrequency(int bin, int totalBins) const;
     juce::String formatFrequency(float freq) const;
 
-    // Scale toggle button area
-    juce::Rectangle<int> scaleToggleArea;
-
     // Colors
-    juce::Colour backgroundColour{0xff0a0a0a};
-    juce::Colour gridColour{0xff1a1a1a};
-    juce::Colour spectrumColour{0xff444444};
-    juce::Colour tonalColour{0x884488ff};
-    juce::Colour noiseColour{0x88ff8844};
+    const juce::Colour backgroundColour { Theme::bgDark };                 // match the window black
+    const juce::Colour gridColour       { Theme::bgLight };                // subtle grid lines
+    const juce::Colour spectrumColour   { 0xff444444 };                    // neutral magnitude fill
+    const juce::Colour tonalColour      { Theme::tonal.withAlpha(0.53f) };      // translucent tonal overlay
+    const juce::Colour transientColour  { Theme::transient.withAlpha(0.6f) };   // translucent transient overlay
+    const juce::Colour noiseColour      { Theme::noise.withAlpha(0.53f) };      // translucent noise overlay
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SpectrumDisplay)
 };

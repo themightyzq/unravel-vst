@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest an improvement or a new capability.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Concrete proposals tied to a real use case land faster than abstract wishes.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: The real-world situation that's hard or impossible today.
+      placeholder: "When I'm cleaning up dialogue, I want to ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What would the feature look like in the UI / API?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+      description: Workarounds, other plugins/tools, or related approaches.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context (optional)

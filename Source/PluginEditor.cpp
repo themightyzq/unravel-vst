@@ -5,21 +5,26 @@
 UnravelAudioProcessorEditor::UnravelAudioProcessorEditor(UnravelAudioProcessor& p)
     : AudioProcessorEditor(&p), audioProcessor(p)
 {
+    // Apply the themed look to the whole editor (cascades to child controls).
+    setLookAndFeel(&lookAndFeel);
+
     // XY Pad - main control
     xyPad = std::make_unique<XYPad>(audioProcessor.getAPVTS());
     xyPad->setTooltip("Mix Control: Drag to blend between Tonal (horizontal) and Noise (vertical) components. "
                       "Bottom-left = silence, Top-right = full mix of both. "
-                      "Scroll to zoom, double-click to reset. Arrow keys for fine adjustment, Home to reset to 0dB.");
+                      "Scroll to zoom, 1x button to reset zoom. Arrow keys for fine adjustment, Home to reset to 0dB.");
     addAndMakeVisible(xyPad.get());
 
     // Spectrum Display
     spectrumDisplay = std::make_unique<SpectrumDisplay>();
-    spectrumDisplay->setCallbacks(
-        [this]() { return audioProcessor.getCurrentMagnitudes(); },
-        [this]() { return audioProcessor.getCurrentTonalMask(); },
-        [this]() { return audioProcessor.getCurrentNoiseMask(); },
-        [this]() { return audioProcessor.getNumBins(); }
-    );
+    spectrumDisplay->setSnapshotCallback(
+        [this](std::vector<float>& mag,
+               std::vector<float>& tonal,
+               std::vector<float>& transient,
+               std::vector<float>& noise)
+        {
+            return audioProcessor.readSpectrumSnapshot(mag, tonal, transient, noise);
+        });
     spectrumDisplay->setSampleRate(audioProcessor.getSampleRate());
     spectrumDisplay->setTooltip("Spectrum Display: Shows the frequency content of your audio. "
                                 "Blue = tonal components, Orange = noise components. "
@@ -46,9 +51,13 @@ UnravelAudioProcessorEditor::UnravelAudioProcessorEditor(UnravelAudioProcessor& 
     addAndMakeVisible(scaleToggleButton);
 
     // Window configuration
-    setSize(defaultWidth, defaultHeight);
     setResizable(true, true);
     setResizeLimits(480, 600, 750, 900);
+    // Restore the last editor size from persisted state (saved in resized()).
+    auto& state = audioProcessor.getAPVTS().state;
+    const int storedW = static_cast<int>(state.getProperty("editorWidth",  defaultWidth));
+    const int storedH = static_cast<int>(state.getProperty("editorHeight", defaultHeight));
+    setSize(juce::jlimit(480, 750, storedW), juce::jlimit(600, 900, storedH));
 
     startTimerHz(30);
 }
@@ -56,13 +65,15 @@ UnravelAudioProcessorEditor::UnravelAudioProcessorEditor(UnravelAudioProcessor& 
 UnravelAudioProcessorEditor::~UnravelAudioProcessorEditor()
 {
     stopTimer();
+    // Detach the LookAndFeel before any child component is destroyed.
+    setLookAndFeel(nullptr);
 }
 
 void UnravelAudioProcessorEditor::setupHeader()
 {
     // Title
     titleLabel.setText("UNRAVEL", juce::dontSendNotification);
-    titleLabel.setFont(juce::FontOptions(20.0f).withStyle("Bold"));
+    titleLabel.setFont(juce::FontOptions(Theme::fontTitle).withStyle("Bold"));
     titleLabel.setColour(juce::Label::textColourId, accent);
     titleLabel.setJustificationType(juce::Justification::centredLeft);
     addAndMakeVisible(titleLabel);
@@ -79,45 +90,19 @@ void UnravelAudioProcessorEditor::setupHeader()
     addAndMakeVisible(bypassButton);
     bypassAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         audioProcessor.getAPVTS(), ParameterIDs::bypass, bypassButton);
-
-    // Quality button
-    qualityButton.setButtonText("HQ");
-    qualityButton.setClickingTogglesState(true);
-    qualityButton.setColour(juce::TextButton::buttonColourId, bgLight);
-    qualityButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff3366cc));
-    qualityButton.setColour(juce::TextButton::textColourOffId, textDim);
-    qualityButton.setColour(juce::TextButton::textColourOnId, juce::Colours::white);
-    qualityButton.setTooltip("High Quality: Uses a larger analysis window for cleaner separation. "
-                             "Sounds better but adds more latency. Best for mixing, not live use.");
-    addAndMakeVisible(qualityButton);
-    qualityAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-        audioProcessor.getAPVTS(), ParameterIDs::quality, qualityButton);
-
-    // Debug button - STFT passthrough for debugging
-    debugButton.setButtonText("DBG");
-    debugButton.setClickingTogglesState(true);
-    debugButton.setColour(juce::TextButton::buttonColourId, bgLight);
-    debugButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xffff6600));
-    debugButton.setColour(juce::TextButton::textColourOffId, textDim);
-    debugButton.setColour(juce::TextButton::textColourOnId, juce::Colours::white);
-    debugButton.setTooltip("STFT Debug: Bypasses mask estimation and passes audio through STFT only. "
-                           "If distortion disappears when ON, the bug is in mask estimation. "
-                           "If distortion persists, the bug is in STFT processing.");
-    addAndMakeVisible(debugButton);
-    debugAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-        audioProcessor.getAPVTS(), ParameterIDs::debugPassthrough, debugButton);
 }
 
 void UnravelAudioProcessorEditor::setupKnobs()
 {
+    // All knobs share the single Theme::accent fill (the previous teal/grey/red/yellow
+    // mix carried no semantic meaning), so the helper just hardcodes it.
     auto setupKnob = [this](juce::Slider& knob, juce::Label& label,
-                            const juce::String& name, const juce::String& tooltip,
-                            juce::Colour color) {
+                            const juce::String& name, const juce::String& tooltip) {
         knob.setSliderStyle(juce::Slider::RotaryVerticalDrag);
         knob.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 16);
-        knob.setColour(juce::Slider::rotarySliderFillColourId, color);
+        knob.setColour(juce::Slider::rotarySliderFillColourId, accent);
         knob.setColour(juce::Slider::rotarySliderOutlineColourId, bgLight);
-        knob.setColour(juce::Slider::thumbColourId, color);
+        knob.setColour(juce::Slider::thumbColourId, accent);
         knob.setColour(juce::Slider::textBoxTextColourId, textBright);
         knob.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
         knob.setColour(juce::Slider::textBoxBackgroundColourId, bgMid);
@@ -125,7 +110,7 @@ void UnravelAudioProcessorEditor::setupKnobs()
         addAndMakeVisible(knob);
 
         label.setText(name, juce::dontSendNotification);
-        label.setFont(juce::FontOptions(11.0f).withStyle("Bold"));
+        label.setFont(juce::FontOptions(Theme::fontLabel).withStyle("Bold"));
         label.setColour(juce::Label::textColourId, textBright);
         label.setJustificationType(juce::Justification::centred);
         addAndMakeVisible(label);
@@ -133,18 +118,16 @@ void UnravelAudioProcessorEditor::setupKnobs()
 
     setupKnob(separationKnob, separationLabel, "SEPARATION",
               "Separation Strength: How much to split tonal from noise. "
-              "Low = subtle, blended. High = dramatic, isolated components.", accent);
+              "Low = subtle, blended. High = dramatic, isolated components.");
     setupKnob(focusKnob, focusLabel, "FOCUS",
               "Detection Bias: Shifts what counts as 'tonal' vs 'noise'. "
-              "Negative = more goes to tonal. Positive = more goes to noise. Zero = balanced.", textBright);
+              "Negative = more goes to tonal. Positive = more goes to noise. Zero = balanced.");
     setupKnob(floorKnob, floorLabel, "FLOOR",
               "Noise Floor: Cleans up quiet residue in each component. "
-              "Zero = natural sound. Higher = harder cutoff, more isolation but less natural.",
-              juce::Colour(0xffff6644));
+              "Zero = natural sound. Higher = harder cutoff, more isolation but less natural.");
     setupKnob(brightnessKnob, brightnessLabel, "BRIGHT",
               "Brightness: High shelf filter for adjusting treble after separation. "
-              "Negative = darker, Positive = brighter. Zero = no change.",
-              juce::Colour(0xffffcc44));
+              "Negative = darker, Positive = brighter. Zero = no change.");
 
     separationAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         audioProcessor.getAPVTS(), ParameterIDs::separation, separationKnob);
@@ -172,7 +155,7 @@ void UnravelAudioProcessorEditor::setupSoloMute()
 
     // Tonal section label
     tonalLabel.setText("TONAL", juce::dontSendNotification);
-    tonalLabel.setFont(juce::FontOptions(11.0f).withStyle("Bold"));
+    tonalLabel.setFont(juce::FontOptions(Theme::fontLabel).withStyle("Bold"));
     tonalLabel.setColour(juce::Label::textColourId, tonalColor);
     tonalLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(tonalLabel);
@@ -191,7 +174,7 @@ void UnravelAudioProcessorEditor::setupSoloMute()
 
     // Noise section label
     noiseLabel.setText("NOISE", juce::dontSendNotification);
-    noiseLabel.setFont(juce::FontOptions(11.0f).withStyle("Bold"));
+    noiseLabel.setFont(juce::FontOptions(Theme::fontLabel).withStyle("Bold"));
     noiseLabel.setColour(juce::Label::textColourId, noiseColor);
     noiseLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(noiseLabel);
@@ -207,70 +190,128 @@ void UnravelAudioProcessorEditor::setupSoloMute()
         audioProcessor.getAPVTS(), ParameterIDs::soloNoise, soloNoiseButton);
     muteNoiseAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         audioProcessor.getAPVTS(), ParameterIDs::muteNoise, muteNoiseButton);
+
+    // Transient section label
+    transientFooterLabel.setText("TRANS", juce::dontSendNotification);
+    transientFooterLabel.setFont(juce::FontOptions(Theme::fontLabel).withStyle("Bold"));
+    transientFooterLabel.setColour(juce::Label::textColourId, Theme::transient);
+    transientFooterLabel.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(transientFooterLabel);
+
+    setupButton(soloTransientButton, "SOLO", juce::Colour(0xffffcc00),
+                "Solo Transient: listen to ONLY the transient component (drum hits, plosives, attacks). "
+                "Great for checking what's being detected as a transient.");
+    setupButton(muteTransientButton, "MUTE", juce::Colour(0xffcc3333),
+                "Mute Transient: remove the transient component from the output. "
+                "You'll hear only the tonal + noise (sustained) content.");
+
+    soloTransientAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        audioProcessor.getAPVTS(), ParameterIDs::soloTransient, soloTransientButton);
+    muteTransientAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        audioProcessor.getAPVTS(), ParameterIDs::muteTransient, muteTransientButton);
+
+    // Transient gain — vertical fader between the XY pad and the right edge.
+    transientGainSlider.setSliderStyle(juce::Slider::LinearVertical);
+    transientGainSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 44, 14);
+    transientGainSlider.setColour(juce::Slider::trackColourId, Theme::transient);
+    transientGainSlider.setColour(juce::Slider::backgroundColourId, bgLight);
+    transientGainSlider.setColour(juce::Slider::thumbColourId, Theme::transient);
+    transientGainSlider.setColour(juce::Slider::textBoxTextColourId, textBright);
+    transientGainSlider.setColour(juce::Slider::textBoxBackgroundColourId, bgMid);
+    transientGainSlider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+    transientGainSlider.setTooltip("Transient gain: how much of the impulsive content (drum hits, "
+                                   "plosives, attacks) passes through. Pull down to soften attacks; "
+                                   "push up to emphasize them.");
+    addAndMakeVisible(transientGainSlider);
+
+    transientGainLabel.setText("TRANS", juce::dontSendNotification);
+    transientGainLabel.setFont(juce::FontOptions(Theme::fontSmall).withStyle("Bold"));
+    transientGainLabel.setColour(juce::Label::textColourId, Theme::transient);
+    transientGainLabel.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(transientGainLabel);
+
+    transientGainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.getAPVTS(), ParameterIDs::transientGain, transientGainSlider);
 }
 
 void UnravelAudioProcessorEditor::setupPresets()
 {
     // Preset label
     presetLabel.setText("PRESET", juce::dontSendNotification);
-    presetLabel.setFont(juce::FontOptions(10.0f).withStyle("Bold"));
+    presetLabel.setFont(juce::FontOptions(Theme::fontSmall).withStyle("Bold"));
     presetLabel.setColour(juce::Label::textColourId, textDim);
     presetLabel.setJustificationType(juce::Justification::centredRight);
     addAndMakeVisible(presetLabel);
 
-    // Preset dropdown
+    // Preset dropdown. This acts as a loader (an action menu), not a "current state"
+    // indicator: it shows "Presets" when idle and resets after loading, so it can
+    // never falsely claim to reflect controls the user has since moved.
     presetSelector.addItem("Default", 1);
     presetSelector.addItem("Extract Tonal", 2);
     presetSelector.addItem("Extract Noise", 3);
     presetSelector.addItem("Gentle Separation", 4);
-    presetSelector.addItem("Full Mix", 5);
-    presetSelector.setSelectedId(1, juce::dontSendNotification);
+    presetSelector.setTextWhenNothingSelected("Presets");
+    presetSelector.setSelectedId(0, juce::dontSendNotification);
     presetSelector.setColour(juce::ComboBox::backgroundColourId, bgLight);
     presetSelector.setColour(juce::ComboBox::textColourId, textBright);
     presetSelector.setColour(juce::ComboBox::outlineColourId, bgLight);
     presetSelector.setColour(juce::ComboBox::arrowColourId, accent);
-    presetSelector.setTooltip("Quick Presets: Choose a starting point for common tasks. "
-                              "'Extract Tonal' isolates melodies/harmonics. 'Extract Noise' isolates textures/ambience. "
-                              "'Gentle' gives subtle separation. 'Full Mix' resets to hear everything.");
+    presetSelector.setTooltip("Quick Presets: load a starting point (this sets ALL controls). "
+                              "'Default' resets to neutral. 'Extract Tonal' isolates melodies/harmonics. "
+                              "'Extract Noise' isolates textures/ambience. 'Gentle' gives subtle separation.");
     presetSelector.onChange = [this]() {
+        // loadPreset args: tonalDb, noiseDb, transientDb, separation%, focus, floor%, brightnessDb
+        // Extract Tonal / Extract Noise also mute the Transient stream — isolating
+        // a sustained stream means you don't want drum hits / plosives leaking through.
         switch (presetSelector.getSelectedId())
         {
-            case 1: // Default
-                loadPreset(0.0f, 0.0f, 75.0f, 0.0f, 0.0f);
-                break;
-            case 2: // Extract Tonal
-                loadPreset(0.0f, -60.0f, 90.0f, -50.0f, 30.0f);
-                break;
-            case 3: // Extract Noise
-                loadPreset(-60.0f, 0.0f, 90.0f, 50.0f, 30.0f);
-                break;
-            case 4: // Gentle
-                loadPreset(0.0f, 0.0f, 40.0f, 0.0f, 0.0f);
-                break;
-            case 5: // Full Mix
-                loadPreset(0.0f, 0.0f, 75.0f, 0.0f, 0.0f);
-                break;
+            case 1: loadPreset(0.0f,    0.0f,   0.0f, 75.0f,   0.0f, 0.0f,  0.0f); break; // Default (neutral, all streams pass)
+            case 2: loadPreset(0.0f,  -60.0f, -60.0f, 90.0f, -50.0f, 30.0f, 0.0f); break; // Extract Tonal — mute noise + transient
+            case 3: loadPreset(-60.0f,  0.0f, -60.0f, 90.0f,  50.0f, 30.0f, 0.0f); break; // Extract Noise — mute tonal + transient
+            case 4: loadPreset(0.0f,    0.0f,   0.0f, 40.0f,   0.0f, 0.0f,  0.0f); break; // Gentle (all streams pass, soft separation)
+            default: return;
         }
+        // Reset to the "Presets" placeholder (no notification → no re-entry).
+        presetSelector.setSelectedId(0, juce::dontSendNotification);
     };
     addAndMakeVisible(presetSelector);
 }
 
-void UnravelAudioProcessorEditor::loadPreset(float tonalDb, float noiseDb,
-                                              float separation, float focus, float floor)
+void UnravelAudioProcessorEditor::loadPreset(float tonalDb, float noiseDb, float transientDb,
+                                              float separation, float focus,
+                                              float floor, float brightness)
 {
-    // Set XY pad position
-    float tonalNorm = (tonalDb + 60.0f) / 72.0f;
-    float noiseNorm = (noiseDb + 60.0f) / 72.0f;
+    auto& apvts = audioProcessor.getAPVTS();
+
+    auto setParam = [&apvts](const juce::String& id, float plainValue)
+    {
+        if (auto* p = apvts.getParameter(id))
+            p->setValueNotifyingHost(p->convertTo0to1(plainValue));
+    };
+
+    // Tonal/Noise gains via the XY pad (keeps the thumb in sync)
+    const float tonalNorm = (tonalDb + 60.0f) / 72.0f;
+    const float noiseNorm = (noiseDb + 60.0f) / 72.0f;
     xyPad->setPosition(tonalNorm, 1.0f - noiseNorm);
 
-    // Set separation parameters
-    auto& apvts = audioProcessor.getAPVTS();
-    if (auto* param = apvts.getParameter(ParameterIDs::separation))
-        param->setValueNotifyingHost(param->convertTo0to1(separation));
-    if (auto* param = apvts.getParameter(ParameterIDs::focus))
-        param->setValueNotifyingHost(param->convertTo0to1(focus));
-    if (auto* param = apvts.getParameter(ParameterIDs::spectralFloor))
-        param->setValueNotifyingHost(param->convertTo0to1(floor));
+    // Transient gain (set directly — its own slider, not on the pad)
+    setParam(ParameterIDs::transientGain, transientDb);
+
+    // Separation / focus / floor / brightness
+    setParam(ParameterIDs::separation, separation);
+    setParam(ParameterIDs::focus, focus);
+    setParam(ParameterIDs::spectralFloor, floor);
+    setParam(ParameterIDs::brightness, brightness);
+
+    // A preset defines the whole sound: clear all per-stream solo/mute and bypass
+    // so the preset plays as intended rather than inheriting stale state.
+    setParam(ParameterIDs::soloTonal,     0.0f);
+    setParam(ParameterIDs::soloNoise,     0.0f);
+    setParam(ParameterIDs::soloTransient, 0.0f);
+    setParam(ParameterIDs::muteTonal,     0.0f);
+    setParam(ParameterIDs::muteNoise,     0.0f);
+    setParam(ParameterIDs::muteTransient, 0.0f);
+    setParam(ParameterIDs::bypass,        0.0f);
 }
 
 void UnravelAudioProcessorEditor::paint(juce::Graphics& g)
@@ -289,10 +330,6 @@ void UnravelAudioProcessorEditor::drawSectionDividers(juce::Graphics& g)
     g.setColour(bgLight);
 
     auto bounds = getLocalBounds();
-    const int headerHeight = 44;
-    const int spectrumHeight = 80;
-    const int knobAreaHeight = 100;
-    const int soloMuteHeight = 50;
 
     // Line below header
     g.drawHorizontalLine(headerHeight, 0, static_cast<float>(bounds.getWidth()));
@@ -312,21 +349,15 @@ void UnravelAudioProcessorEditor::resized()
 {
     auto bounds = getLocalBounds();
 
-    const int headerHeight = 44;
-    const int spectrumHeight = 80;
-    const int knobAreaHeight = 100;  // Larger knobs
-    const int soloMuteHeight = 50;   // Dedicated row for solo/mute
-    const int padding = 10;
+    const int padding = Theme::pad;
 
     // === HEADER ===
     auto header = bounds.removeFromTop(headerHeight).reduced(padding, 0);
     titleLabel.setBounds(header.removeFromLeft(90).withTrimmedTop(10));
 
-    // Right side: Bypass + HQ + DBG buttons (standardized 48x28)
-    auto headerRight = header.removeFromRight(168);
-    debugButton.setBounds(headerRight.removeFromRight(48).reduced(2, 8));
-    qualityButton.setBounds(headerRight.removeFromRight(48).reduced(2, 8));
-    bypassButton.setBounds(headerRight.removeFromRight(48).reduced(2, 8));
+    // Right side: Bypass button — wide enough that the "BYPASS" label isn't clipped.
+    auto headerRight = header.removeFromRight(72);
+    bypassButton.setBounds(headerRight.removeFromRight(64).reduced(2, 8));
 
     // Center: Preset dropdown
     auto presetArea = header.reduced(20, 8);
@@ -337,26 +368,32 @@ void UnravelAudioProcessorEditor::resized()
     auto spectrumArea = bounds.removeFromTop(spectrumHeight).reduced(padding, 4);
     spectrumDisplay->setBounds(spectrumArea);
 
-    // === FOOTER BAR (Solo/Mute + Scale Toggle) ===
+    // === FOOTER BAR (per-stream Solo/Mute + Scale Toggle) ===
     auto footerBar = bounds.removeFromBottom(soloMuteHeight).reduced(padding, 6);
 
     // Scale toggle on the right (standardized 48x28)
     scaleToggleButton.setBounds(footerBar.removeFromRight(48).reduced(0, 5));
 
-    // Tonal group (label + solo + mute) - Solo/Mute are 52x28
-    auto tonalGroup = footerBar.removeFromLeft(160);
-    tonalLabel.setBounds(tonalGroup.removeFromLeft(50).reduced(0, 8));
-    soloTonalButton.setBounds(tonalGroup.removeFromLeft(52).reduced(0, 5));
-    muteTonalButton.setBounds(tonalGroup.removeFromLeft(52).reduced(0, 5));
+    // Three compact groups: TONAL | NOISE | TRANS  (each label 42 + S 44 + M 44 = 130).
+    // Width budget at the 480px min: 480 - 2*padding(10) - scaleToggle(48) = 412.
+    // 3 groups * 130 + 2 inter-group gaps * 6 = 402, leaving 10px of slack.
+    // Anything wider than 130 per group will start clipping into the scale toggle
+    // at the minimum window size — bump the resize limits first if a 4th group
+    // is ever added.
+    const auto layoutGroup = [](juce::Rectangle<int>& bar, juce::Label& label,
+                                juce::TextButton& solo, juce::TextButton& mute)
+    {
+        auto group = bar.removeFromLeft(130);
+        label.setBounds(group.removeFromLeft(42).reduced(0, 8));
+        solo.setBounds(group.removeFromLeft(44).reduced(0, 5));
+        mute.setBounds(group.removeFromLeft(44).reduced(0, 5));
+    };
 
-    // Small gap
-    footerBar.removeFromLeft(10);
-
-    // Noise group (label + solo + mute) - Solo/Mute are 52x28
-    auto noiseGroup = footerBar.removeFromLeft(160);
-    noiseLabel.setBounds(noiseGroup.removeFromLeft(50).reduced(0, 8));
-    soloNoiseButton.setBounds(noiseGroup.removeFromLeft(52).reduced(0, 5));
-    muteNoiseButton.setBounds(noiseGroup.removeFromLeft(52).reduced(0, 5));
+    layoutGroup(footerBar, tonalLabel,            soloTonalButton,     muteTonalButton);
+    footerBar.removeFromLeft(6);
+    layoutGroup(footerBar, noiseLabel,            soloNoiseButton,     muteNoiseButton);
+    footerBar.removeFromLeft(6);
+    layoutGroup(footerBar, transientFooterLabel,  soloTransientButton, muteTransientButton);
 
     // === KNOB AREA ===
     auto knobArea = bounds.removeFromBottom(knobAreaHeight).reduced(padding, 4);
@@ -378,14 +415,28 @@ void UnravelAudioProcessorEditor::resized()
     brightnessLabel.setBounds(brightArea.removeFromTop(16));
     brightnessKnob.setBounds(brightArea.reduced(4, 0));
 
-    // === XY PAD (remaining space) ===
+    // === XY PAD + TRANSIENT FADER ===
+    // The XY pad covers Tonal × Noise (the two streams a user wants to play
+    // with continuously). The Transient stream gets a dedicated vertical fader
+    // on the right — it's a "set this level" control, not a sweep.
     bounds = bounds.reduced(padding);
+    const int transientColW = 48;
+    const int padToFaderGap = 8;
+
+    auto transientCol = bounds.removeFromRight(transientColW);
+    transientGainLabel.setBounds(transientCol.removeFromTop(16));
+    transientGainSlider.setBounds(transientCol);
+
+    bounds.removeFromRight(padToFaderGap);
     xyPad->setBounds(bounds);
+
+    // Persist the current editor size so it survives close/reopen and host save/load.
+    auto& state = audioProcessor.getAPVTS().state;
+    state.setProperty("editorWidth",  getWidth(),  nullptr);
+    state.setProperty("editorHeight", getHeight(), nullptr);
 }
 
 void UnravelAudioProcessorEditor::timerCallback()
 {
-    tonalLevel = audioProcessor.currentTonalLevel.load();
-    noiseLevel = audioProcessor.currentNoisyLevel.load();
     spectrumDisplay->setSampleRate(audioProcessor.getSampleRate());
 }

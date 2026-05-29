@@ -8,6 +8,12 @@ UnravelAudioProcessor::UnravelAudioProcessor()
                       .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
        apvts(*this, nullptr, "Parameters", createParameterLayout())
 {
+    // Pre-size the spectrum snapshot once (bin count is fixed) so prepareToPlay
+    // never reallocates the storage the UI reader points at.
+    snapMagnitudes_.assign(static_cast<size_t>(numBins), 0.0f);
+    snapTonalMask_.assign(static_cast<size_t>(numBins), 0.0f);
+    snapTransientMask_.assign(static_cast<size_t>(numBins), 0.0f);
+    snapNoiseMask_.assign(static_cast<size_t>(numBins), 0.0f);
 }
 
 UnravelAudioProcessor::~UnravelAudioProcessor()
@@ -46,6 +52,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout UnravelAudioProcessor::creat
         "Mute Noise",
         false
     ));
+    params.push_back(std::make_unique<juce::AudioParameterBool>(
+        ParameterIDs::soloTransient,
+        "Solo Transient",
+        false
+    ));
+    params.push_back(std::make_unique<juce::AudioParameterBool>(
+        ParameterIDs::muteTransient,
+        "Mute Transient",
+        false
+    ));
 
     // Tonal Gain: -60 to +12 dB (exactly as specified)
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
@@ -67,6 +83,20 @@ juce::AudioProcessorValueTreeState::ParameterLayout UnravelAudioProcessor::creat
         "Noise Gain",
         juce::NormalisableRange<float>(-60.0f, 12.0f, 0.1f, 1.0f),
         0.0f, // Default: 0 dB (unity gain)
+        "dB",
+        juce::AudioProcessorParameter::genericParameter,
+        [](float value, int) {
+            if (value <= -60.0f) return juce::String("-inf");
+            return juce::String(value, 1) + " dB";
+        }
+    ));
+
+    // Transient Gain: -60 to +12 dB (same range as the other two stream gains)
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        ParameterIDs::transientGain,
+        "Transient Gain",
+        juce::NormalisableRange<float>(-60.0f, 12.0f, 0.1f, 1.0f),
+        0.0f, // Default: 0 dB (unity gain — let transients through unchanged)
         "dB",
         juce::AudioProcessorParameter::genericParameter,
         [](float value, int) {
@@ -113,20 +143,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout UnravelAudioProcessor::creat
             if (value <= 0.0f) return juce::String("OFF");
             return juce::String(static_cast<int>(value)) + "%";
         }
-    ));
-
-    // Quality Mode: 0 = Low Latency (~15ms), 1 = High Quality (~32ms)
-    params.push_back(std::make_unique<juce::AudioParameterBool>(
-        ParameterIDs::quality,
-        "High Quality",
-        true // Default: High quality mode for better separation
-    ));
-
-    // Debug Passthrough: Skip mask estimation for STFT debugging
-    params.push_back(std::make_unique<juce::AudioParameterBool>(
-        ParameterIDs::debugPassthrough,
-        "STFT Debug",
-        false // Default: OFF (normal processing)
     ));
 
     // Brightness: High shelf filter for post-processing treble adjustment
@@ -180,14 +196,26 @@ bool UnravelAudioProcessor::isMidiEffect() const
 
 double UnravelAudioProcessor::getTailLengthSeconds() const
 {
-    // Return latency in seconds from HPSS processor
-    if (!channelProcessors.empty() && channelProcessors[0])
+    // After input goes silent the STFT overlap-add keeps producing output for
+    // one analysis window past the last input — i.e. ~`fftSize` samples (the
+    // tight tail is `fftSize - hopSize`; using `fftSize` overshoots by one hop,
+    // which is harmless and keeps offline renders from truncating the last frame).
+    if (!channelProcessors.empty() && channelProcessors[0] && currentSampleRate > 0.0)
     {
-        return channelProcessors[0]->getLatencyInMs(currentSampleRate) / 1000.0;
+        const int fftSize = channelProcessors[0]->getFftSize();
+        if (fftSize > 0)
+            return static_cast<double>(fftSize) / currentSampleRate;
     }
-    
-    // Fallback: default low-latency config is ~15ms
-    return 0.015;
+
+    // Fallback before prepareToPlay: high-quality config (2048) ≈ 43ms at 48k.
+    return 2048.0 / 48000.0;
+}
+
+juce::AudioProcessorParameter* UnravelAudioProcessor::getBypassParameter() const
+{
+    // Tell the host which parameter is the bypass, so the host's generic bypass
+    // maps to our Bypass control (we implement the actual bypass in processBlock).
+    return apvts.getParameter(ParameterIDs::bypass);
 }
 
 int UnravelAudioProcessor::getNumPrograms()
@@ -225,28 +253,24 @@ void UnravelAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBloc
     
     // Initialize HPSS processors
     channelProcessors.clear();
-    tonalBuffers.clear();
-    noiseBuffers.clear();
-    
+
     for (int ch = 0; ch < numInputChannels; ++ch)
     {
-        auto processor = std::make_unique<HPSSProcessor>(true); // Use low-latency mode
+        auto processor = std::make_unique<HPSSProcessor>(false); // High-quality mode (2048/512); built once here
         processor->prepare(sampleRate, samplesPerBlock);
         channelProcessors.push_back(std::move(processor));
-        
-        // Allocate component buffers
-        tonalBuffers.emplace_back(samplesPerBlock, 0.0f);
-        noiseBuffers.emplace_back(samplesPerBlock, 0.0f);
     }
     
     // Setup parameter smoothers (20ms smoothing time)
     tonalGainSmoothed.reset(sampleRate, 0.02);
     noisyGainSmoothed.reset(sampleRate, 0.02);
+    transientGainSmoothed.reset(sampleRate, 0.02);
 
     // Initialize brightness filter (post-processing high shelf)
-    brightnessGainSmoother_.reset(sampleRate, 0.02);  // 20ms ramp
-    brightnessGainSmoother_.setCurrentAndTargetValue(0.0f);
     brightnessParam_ = apvts.getRawParameterValue(ParameterIDs::brightness);
+    const float initialBrightness = brightnessParam_ != nullptr ? brightnessParam_->load() : 0.0f;
+    brightnessGainSmoother_.reset(sampleRate, 0.02);  // 20ms ramp
+    brightnessGainSmoother_.setCurrentAndTargetValue(initialBrightness);
 
     juce::dsp::ProcessSpec spec;
     spec.sampleRate = sampleRate;
@@ -254,12 +278,37 @@ void UnravelAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBloc
     spec.numChannels = 1;
 
     for (auto& filter : brightnessFilters_)
-    {
         filter.prepare(spec);
+
+    // Build the high-shelf coefficient table once (allocates here, never on the audio thread)
+    // and point the filters at the entry matching the current parameter value.
+    rebuildBrightnessTable(sampleRate);
+    for (auto& filter : brightnessFilters_)
+    {
+        filter.coefficients = brightnessCoeffTable_[static_cast<size_t>(brightnessTableIndex(initialBrightness))];
+        // reset() AFTER assigning the order-2 coefficients so the filter's cached order is
+        // synced here (off the audio thread). Otherwise the first processSample() would see the
+        // order change and reallocate filter state on the audio thread. All table entries are
+        // order-2 high shelves, so the per-block coefficient swaps in processBlock never realloc.
         filter.reset();
     }
-    updateBrightnessCoefficients(sampleRate, 0.0f);
-    lastBrightnessGain_ = 0.0f;
+
+    // Size the spectrum snapshot to the (now fixed) bin count and clear it.
+    const int snapBins = (!channelProcessors.empty() && channelProcessors[0])
+        ? channelProcessors[0]->getNumBins() : numBins;
+    // The snapshot vectors are CONSTRUCT-ONLY — sized once in the ctor to `numBins`
+    // and never reallocated again, so the UI reader can read `.size()` and iterate
+    // without synchronisation. We only zero contents here; storage identity is
+    // stable. (If a low-latency quality mode is ever reintroduced and bin counts
+    // can change at runtime, the snapshot wiring must move to a triple-buffer or
+    // an atomic-swap-of-pointers design.)
+    jassert(snapBins == numBins);
+    jassert(snapMagnitudes_.size() == static_cast<size_t>(numBins));
+    std::fill(snapMagnitudes_.begin(),    snapMagnitudes_.end(),    0.0f);
+    std::fill(snapTonalMask_.begin(),     snapTonalMask_.end(),     0.0f);
+    std::fill(snapTransientMask_.begin(), snapTransientMask_.end(), 0.0f);
+    std::fill(snapNoiseMask_.begin(),     snapNoiseMask_.end(),     0.0f);
+    snapSeq_.store(0, std::memory_order_release);
 
     // Report latency to host for proper delay compensation
     if (!channelProcessors.empty() && channelProcessors[0])
@@ -277,76 +326,80 @@ void UnravelAudioProcessor::releaseResources()
 
 bool UnravelAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
-    // Stereo only, input must match output
-    if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
+    // Input must match output; we support mono and stereo. The per-channel HPSS
+    // pipeline (one processor per input channel) handles either case unchanged,
+    // which lets the plugin load on mono tracks (e.g. dialogue editing).
+    const auto& mainIn  = layouts.getMainInputChannelSet();
+    const auto& mainOut = layouts.getMainOutputChannelSet();
+
+    if (mainIn != mainOut)
         return false;
 
-    return layouts.getMainOutputChannelSet() == juce::AudioChannelSet::stereo();
+    return mainIn == juce::AudioChannelSet::mono()
+        || mainIn == juce::AudioChannelSet::stereo();
 }
 
 void UnravelAudioProcessor::updateParameters() noexcept
 {
     // Get parameter values from APVTS
-    const float tonalGainDb = apvts.getRawParameterValue(ParameterIDs::tonalGain)->load();
-    const float noisyGainDb = apvts.getRawParameterValue(ParameterIDs::noisyGain)->load();
+    const float tonalGainDb     = apvts.getRawParameterValue(ParameterIDs::tonalGain)->load();
+    const float noisyGainDb     = apvts.getRawParameterValue(ParameterIDs::noisyGain)->load();
+    const float transientGainDb = apvts.getRawParameterValue(ParameterIDs::transientGain)->load();
     const float separationPercent = apvts.getRawParameterValue(ParameterIDs::separation)->load();
     const float focusValue = apvts.getRawParameterValue(ParameterIDs::focus)->load();
     const float spectralFloorPercent = apvts.getRawParameterValue(ParameterIDs::spectralFloor)->load();
-    const bool qualityMode = apvts.getRawParameterValue(ParameterIDs::quality)->load() > 0.5f;
-    const bool debugPassthrough = apvts.getRawParameterValue(ParameterIDs::debugPassthrough)->load() > 0.5f;
 
-    // Get solo/mute states
-    soloTonal = apvts.getRawParameterValue(ParameterIDs::soloTonal)->load() > 0.5f;
-    soloNoise = apvts.getRawParameterValue(ParameterIDs::soloNoise)->load() > 0.5f;
-    muteTonal = apvts.getRawParameterValue(ParameterIDs::muteTonal)->load() > 0.5f;
-    muteNoise = apvts.getRawParameterValue(ParameterIDs::muteNoise)->load() > 0.5f;
+    // Get per-stream solo/mute states (three streams)
+    soloTonal     = apvts.getRawParameterValue(ParameterIDs::soloTonal)->load()     > 0.5f;
+    soloNoise     = apvts.getRawParameterValue(ParameterIDs::soloNoise)->load()     > 0.5f;
+    soloTransient = apvts.getRawParameterValue(ParameterIDs::soloTransient)->load() > 0.5f;
+    muteTonal     = apvts.getRawParameterValue(ParameterIDs::muteTonal)->load()     > 0.5f;
+    muteNoise     = apvts.getRawParameterValue(ParameterIDs::muteNoise)->load()     > 0.5f;
+    muteTransient = apvts.getRawParameterValue(ParameterIDs::muteTransient)->load() > 0.5f;
 
     // Convert dB to linear gain (with -60dB treated as 0 gain)
-    float tonalGain = tonalGainDb <= -60.0f ? 0.0f : std::pow(10.0f, tonalGainDb / 20.0f);
-    float noisyGain = noisyGainDb <= -60.0f ? 0.0f : std::pow(10.0f, noisyGainDb / 20.0f);
-
-    // Apply solo/mute logic
-    // If only one solo is active, mute the other component
-    // If both solos are active, they cancel out (both play)
-    const bool anySolo = soloTonal || soloNoise;
-    const bool bothSolo = soloTonal && soloNoise;
-
-    if (anySolo && !bothSolo)
+    auto dbToLinear = [](float db) noexcept
     {
-        // Only one solo is active
-        if (soloTonal)
-            noisyGain = 0.0f;  // Mute noise when solo tonal
-        else
-            tonalGain = 0.0f;  // Mute tonal when solo noise
+        return db <= -60.0f ? 0.0f : std::pow(10.0f, db / 20.0f);
+    };
+    float tonalGain     = dbToLinear(tonalGainDb);
+    float noisyGain     = dbToLinear(noisyGainDb);
+    float transientGain = dbToLinear(transientGainDb);
+
+    // Solo / Mute matrix for three streams:
+    //   - If any stream is soloed, streams that are NOT soloed are silenced.
+    //     (Multiple solos co-exist: they all play; non-soloed streams are muted.)
+    //   - Mute always overrides afterwards.
+    const bool anySolo = soloTonal || soloNoise || soloTransient;
+    if (anySolo)
+    {
+        if (! soloTonal)     tonalGain     = 0.0f;
+        if (! soloNoise)     noisyGain     = 0.0f;
+        if (! soloTransient) transientGain = 0.0f;
     }
 
-    // Apply mutes (mute always overrides)
-    if (muteTonal)
-        tonalGain = 0.0f;
-    if (muteNoise)
-        noisyGain = 0.0f;
+    if (muteTonal)     tonalGain     = 0.0f;
+    if (muteNoise)     noisyGain     = 0.0f;
+    if (muteTransient) transientGain = 0.0f;
 
-    // Set target values for smoothers - these will interpolate to the target
+    // Set target values for smoothers
     tonalGainSmoothed.setTargetValue(tonalGain);
     noisyGainSmoothed.setTargetValue(noisyGain);
+    transientGainSmoothed.setTargetValue(transientGain);
 
-    // Update the current values immediately for responsiveness
-    currentTonalGain = tonalGain;
-    currentNoisyGain = noisyGain;
+    // Update the current values for processBlock to use this block
+    currentTonalGain     = tonalGain;
+    currentNoisyGain     = noisyGain;
+    currentTransientGain = transientGain;
 
     // Update separation parameters (0-100% -> 0-1, -100..+100 -> -1..+1)
     currentSeparation = separationPercent / 100.0f;
     currentFocus = focusValue / 100.0f;
     currentSpectralFloor = spectralFloorPercent / 100.0f;
 
-    // Check if quality mode changed
-    if (qualityMode != currentQualityMode)
-    {
-        currentQualityMode = qualityMode;
-        qualityModeChanged = true;
-    }
-
-    // Apply separation/focus/floor to all channel processors
+    // Apply separation/focus/floor to all channel processors.
+    // Quality (FFT size) is fixed at construction in prepareToPlay, so nothing
+    // here reallocates or changes latency on the audio thread.
     for (auto& processor : channelProcessors)
     {
         if (processor)
@@ -354,23 +407,6 @@ void UnravelAudioProcessor::updateParameters() noexcept
             processor->setSeparation(currentSeparation);
             processor->setFocus(currentFocus);
             processor->setSpectralFloor(currentSpectralFloor);
-            processor->setDebugPassthrough(debugPassthrough);
-
-            // Apply quality mode change if needed
-            if (qualityModeChanged)
-            {
-                processor->setQualityMode(currentQualityMode);
-            }
-        }
-    }
-
-    // Update latency if quality mode changed (FFT size changes)
-    if (qualityModeChanged)
-    {
-        qualityModeChanged = false;
-        if (!channelProcessors.empty() && channelProcessors[0])
-        {
-            setLatencySamples(channelProcessors[0]->getLatencyInSamples());
         }
     }
 }
@@ -411,62 +447,37 @@ void UnravelAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
         const float* inputData = buffer.getReadPointer(channel);
         float* outputData = buffer.getWritePointer(channel);
         
-        // Process with HPSS using current gain values (updated in updateParameters)
-        // The gains are now responsive to parameter changes
+        // Process with HPSS using current gain values (updated in updateParameters).
         processor.processBlock(inputData, outputData,
-                             tonalBuffers[channel].data(),
-                             noiseBuffers[channel].data(),
                              numSamples,
                              currentTonalGain,
-                             currentNoisyGain);
+                             currentNoisyGain,
+                             currentTransientGain);
     }
+
+    // Publish the latest analysis frame for the UI (lock-free; no UI access to live buffers).
+    publishSpectrumSnapshot(isBypassed);
 
     // Apply brightness filter (post-HPSS high shelf processing)
     if (brightnessParam_ != nullptr)
     {
-        const float targetBrightness = brightnessParam_->load();
-        brightnessGainSmoother_.setTargetValue(targetBrightness);
+        brightnessGainSmoother_.setTargetValue(brightnessParam_->load());
 
-        // Update coefficients if gain changed significantly
-        if (std::abs(targetBrightness - lastBrightnessGain_) > 0.1f)
+        // Advance the 20ms smoother across this block and select the matching
+        // precomputed coefficient set. No allocation, no on/off threshold gating:
+        // a 0 dB high shelf is an identity filter, so always processing is transparent
+        // and avoids the click the old threshold produced.
+        const float smoothedBrightness = brightnessGainSmoother_.skip(numSamples);
+        const auto& coeffs = brightnessCoeffTable_[static_cast<size_t>(brightnessTableIndex(smoothedBrightness))];
+
+        for (int channel = 0; channel < totalNumInputChannels && channel < 2; ++channel)
         {
-            updateBrightnessCoefficients(currentSampleRate, targetBrightness);
-            lastBrightnessGain_ = targetBrightness;
-        }
+            brightnessFilters_[channel].coefficients = coeffs;
+            auto* channelData = buffer.getWritePointer(channel);
 
-        // Only process if brightness is not at unity (0dB) or still smoothing
-        if (std::abs(targetBrightness) > 0.1f || brightnessGainSmoother_.isSmoothing())
-        {
-            for (int channel = 0; channel < totalNumInputChannels && channel < 2; ++channel)
-            {
-                auto* channelData = buffer.getWritePointer(channel);
-
-                for (int i = 0; i < numSamples; ++i)
-                {
-                    channelData[i] = brightnessFilters_[channel].processSample(channelData[i]);
-                }
-            }
+            for (int i = 0; i < numSamples; ++i)
+                channelData[i] = brightnessFilters_[channel].processSample(channelData[i]);
         }
-    }
-
-    // Update level meters for UI (simple RMS calculation on first channel)
-    if (totalNumInputChannels > 0 && numSamples > 0)
-    {
-        const float* channelData = buffer.getReadPointer(0);
-        float rms = 0.0f;
-        
-        for (int i = 0; i < numSamples; ++i)
-        {
-            const float sample = channelData[i];
-            rms += sample * sample;
-        }
-        
-        rms = std::sqrt(rms / numSamples);
-        
-        // Simple meter updates (multiply by current gains for approximate levels)
-        currentTonalLevel.store(rms * currentTonalGain);
-        currentNoisyLevel.store(rms * currentNoisyGain);
-        currentTransientLevel.store(0.0f); // Not used in this implementation
     }
 }
 
@@ -509,31 +520,71 @@ juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 // Visualization Accessors
 // =============================================================================
 
-juce::Span<const float> UnravelAudioProcessor::getCurrentMagnitudes() const noexcept
+void UnravelAudioProcessor::publishSpectrumSnapshot(bool bypassed) noexcept
 {
-    if (!channelProcessors.empty() && channelProcessors[0])
+    // Audio thread: copy the latest analysis frame from channel 0 into the
+    // published snapshot, guarded by a seqlock. Wait-free: two atomic stores
+    // around a fixed-size copy, no allocation, no locks. `bypassed` is the same
+    // value processBlock already loaded — passed in so the snapshot's state can't
+    // disagree with what was actually processed this block.
+    if (channelProcessors.empty() || !channelProcessors[0])
+        return;
+
+    const juce::Span<const float> mag       = bypassed ? juce::Span<const float>{} : channelProcessors[0]->getCurrentMagnitudes();
+    const juce::Span<const float> tonal     = bypassed ? juce::Span<const float>{} : channelProcessors[0]->getCurrentTonalMask();
+    const juce::Span<const float> transient = bypassed ? juce::Span<const float>{} : channelProcessors[0]->getCurrentTransientMask();
+    const juce::Span<const float> noise     = bypassed ? juce::Span<const float>{} : channelProcessors[0]->getCurrentNoiseMask();
+
+    const auto copyOrZero = [](std::vector<float>& dst, juce::Span<const float> src)
     {
-        return channelProcessors[0]->getCurrentMagnitudes();
-    }
-    return {};
+        const size_t n = dst.size();
+        if (src.size() == n)
+            std::copy(src.begin(), src.end(), dst.begin());
+        else
+            std::fill(dst.begin(), dst.end(), 0.0f);
+    };
+
+    snapSeq_.fetch_add(1, std::memory_order_release);           // -> odd: write in progress
+    std::atomic_thread_fence(std::memory_order_release);
+    copyOrZero(snapMagnitudes_, mag);
+    copyOrZero(snapTonalMask_, tonal);
+    copyOrZero(snapTransientMask_, transient);
+    copyOrZero(snapNoiseMask_, noise);
+    std::atomic_thread_fence(std::memory_order_release);
+    snapSeq_.fetch_add(1, std::memory_order_release);           // -> even: stable
 }
 
-juce::Span<const float> UnravelAudioProcessor::getCurrentTonalMask() const noexcept
+bool UnravelAudioProcessor::readSpectrumSnapshot(std::vector<float>& magnitudes,
+                                                 std::vector<float>& tonalMask,
+                                                 std::vector<float>& transientMask,
+                                                 std::vector<float>& noiseMask) const
 {
-    if (!channelProcessors.empty() && channelProcessors[0])
-    {
-        return channelProcessors[0]->getCurrentTonalMask();
-    }
-    return {};
-}
+    const size_t n = snapMagnitudes_.size();
+    if (n == 0)
+        return false;
 
-juce::Span<const float> UnravelAudioProcessor::getCurrentNoiseMask() const noexcept
-{
-    if (!channelProcessors.empty() && channelProcessors[0])
+    magnitudes.resize(n);
+    tonalMask.resize(n);
+    transientMask.resize(n);
+    noiseMask.resize(n);
+
+    // Seqlock read: retry on a torn read or while a write is in progress.
+    for (int attempt = 0; attempt < 8; ++attempt)
     {
-        return channelProcessors[0]->getCurrentNoiseMask();
+        const uint32_t s1 = snapSeq_.load(std::memory_order_acquire);
+        if (s1 & 1u)
+            continue; // writer mid-update
+
+        std::copy(snapMagnitudes_.begin(),     snapMagnitudes_.end(),     magnitudes.begin());
+        std::copy(snapTonalMask_.begin(),      snapTonalMask_.end(),      tonalMask.begin());
+        std::copy(snapTransientMask_.begin(),  snapTransientMask_.end(),  transientMask.begin());
+        std::copy(snapNoiseMask_.begin(),      snapNoiseMask_.end(),      noiseMask.begin());
+
+        std::atomic_thread_fence(std::memory_order_acquire);
+        if (snapSeq_.load(std::memory_order_acquire) == s1)
+            return true;
     }
-    return {};
+    return false; // contended; caller keeps its previous frame
 }
 
 int UnravelAudioProcessor::getNumBins() const noexcept
@@ -545,17 +596,27 @@ int UnravelAudioProcessor::getNumBins() const noexcept
     return 0;
 }
 
-void UnravelAudioProcessor::updateBrightnessCoefficients(double sampleRate, float gainDb)
+void UnravelAudioProcessor::rebuildBrightnessTable(double sampleRate)
 {
-    auto coeffs = juce::dsp::IIR::Coefficients<float>::makeHighShelf(
-        sampleRate,
-        kBrightnessFrequency,
-        kBrightnessQ,
-        juce::Decibels::decibelsToGain(gainDb)
-    );
+    // Precompute one high-shelf coefficient set per 0.1 dB step across the full
+    // -12..+12 dB range. Called only from prepareToPlay (non-real-time).
+    brightnessCoeffTable_.clear();
+    brightnessCoeffTable_.reserve(kBrightnessTableSize);
 
-    for (auto& filter : brightnessFilters_)
+    for (int i = 0; i < kBrightnessTableSize; ++i)
     {
-        *filter.coefficients = *coeffs;
+        const float gainDb = kBrightnessMinDb + static_cast<float>(i) * kBrightnessStepDb;
+        brightnessCoeffTable_.push_back(
+            juce::dsp::IIR::Coefficients<float>::makeHighShelf(
+                sampleRate,
+                kBrightnessFrequency,
+                kBrightnessQ,
+                juce::Decibels::decibelsToGain(gainDb)));
     }
+}
+
+int UnravelAudioProcessor::brightnessTableIndex(float gainDb) const noexcept
+{
+    const int idx = static_cast<int>(std::round((gainDb - kBrightnessMinDb) / kBrightnessStepDb));
+    return juce::jlimit(0, kBrightnessTableSize - 1, idx);
 }

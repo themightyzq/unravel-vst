@@ -34,6 +34,7 @@ void MaskEstimator::prepare(int numBins, double sampleRate) noexcept
     // Initialize previous frame data
     previousMagnitudes.resize(numBins, 0.0f);
     previousSmoothedMask.resize(numBins, 0.5f); // Start with neutral masks
+    transientEnv.resize(numBins, 0.0f);
     
     // Initialize magnitude history (fixed ring buffer for horizontal median)
     // Pre-allocate all memory once - NO allocations during processing
@@ -67,6 +68,7 @@ void MaskEstimator::reset() noexcept
     // Clear previous frame data
     juce::FloatVectorOperations::clear(previousMagnitudes.data(), numBins);
     juce::FloatVectorOperations::fill(previousSmoothedMask.data(), 0.5f, numBins);
+    juce::FloatVectorOperations::clear(transientEnv.data(), numBins);
     
     // Clear magnitude history ring buffer and reset write index
     juce::FloatVectorOperations::clear(magnitudeHistoryData.data(),
@@ -110,10 +112,13 @@ void MaskEstimator::updateStats(juce::Span<const float> magnitudes) noexcept
     juce::FloatVectorOperations::copy(previousMagnitudes.data(), magnitudes.data(), numBins);
 }
 
-void MaskEstimator::computeMasks(juce::Span<float> tonalMask, juce::Span<float> noiseMask) noexcept
+void MaskEstimator::computeMasks(juce::Span<float> tonalMask,
+                                 juce::Span<float> transientMask,
+                                 juce::Span<float> noiseMask) noexcept
 {
     jassert(isInitialized);
     jassert(tonalMask.size() == static_cast<size_t>(numBins));
+    jassert(transientMask.size() == static_cast<size_t>(numBins));
     jassert(noiseMask.size() == static_cast<size_t>(numBins));
 
     // ==========================================================================
@@ -206,13 +211,30 @@ void MaskEstimator::computeMasks(juce::Span<float> tonalMask, juce::Span<float> 
     // Apply spectral floor for extreme isolation (if enabled)
     applySpectralFloor();
 
-    // Copy results to output spans
-    juce::FloatVectorOperations::copy(tonalMask.data(), smoothedMask.data(), numBins);
-
-    // Compute noise mask as complement
+    // Three-stream split (mass-conserving: tonal + transient + noise = 1 per bin).
+    //
+    //   tonalMask     = smoothedMask                                (from HPSS + Wiener)
+    //   transientness = per-bin envelope follower over spectralFlux (fast attack, slow release)
+    //   transientMask = (1 - tonal) * transientness                 (transient share of the residual)
+    //   noiseMask     = (1 - tonal) * (1 - transientness)           (stochastic share of the residual)
+    //
+    // Onsets immediately push transientness toward 1 (fast attack) so a short
+    // broadband event flows to the Transient stream; as the event sustains the
+    // envelope decays (slow release) and the energy moves back into Noise.
     for (int i = 0; i < numBins; ++i)
     {
-        noiseMask[i] = 1.0f - tonalMask[i];
+        const float flux = clamp01(spectralFlux[i]);
+        const float prev = transientEnv[i];
+        const float alpha = (flux > prev) ? transientAttack : transientRelease;
+        transientEnv[i] = prev + (flux - prev) * alpha;
+
+        const float t  = clamp01(smoothedMask[i]);
+        const float tr = clamp01(transientEnv[i]);
+        const float nonTonal = 1.0f - t;
+
+        tonalMask[i]     = t;
+        transientMask[i] = nonTonal * tr;
+        noiseMask[i]     = nonTonal * (1.0f - tr);
     }
 
     // Store smoothed mask for next frame

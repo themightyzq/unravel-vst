@@ -10,8 +10,9 @@ HPSSProcessor::HPSSProcessor(bool lowLatency)
     : useHighQuality_(!lowLatency)
 {
     // Initialize parameter smoothers with fast ramp times for responsive controls
-    tonalGainSmoother_.reset(48000.0, 0.02);  // 20ms ramp time
-    noiseGainSmoother_.reset(48000.0, 0.02);  // 20ms ramp time
+    tonalGainSmoother_.reset(48000.0, 0.02);      // 20ms ramp time
+    noiseGainSmoother_.reset(48000.0, 0.02);      // 20ms ramp time
+    transientGainSmoother_.reset(48000.0, 0.02);  // 20ms ramp time
 }
 
 HPSSProcessor::~HPSSProcessor() = default;
@@ -28,16 +29,16 @@ void HPSSProcessor::prepare(double sampleRate, int maxBlockSize) noexcept
     // Configure parameter smoothers for current sample rate (20ms for responsive controls)
     tonalGainSmoother_.reset(sampleRate, 0.02);
     noiseGainSmoother_.reset(sampleRate, 0.02);
+    transientGainSmoother_.reset(sampleRate, 0.02);
     
     // Initialize all components
     initializeComponents();
     
     // Prepare processing buffers
-    const int bufferSize = std::max(maxBlockSize, numBins_);
     tonalMaskBuffer_.resize(numBins_, 0.0f);
     noiseMaskBuffer_.resize(numBins_, 0.0f);
-    tempOutputBuffer_.resize(maxBlockSize, 0.0f);
-    
+    transientMaskBuffer_.resize(numBins_, 0.0f);
+
     // Prepare bypass buffer with latency compensation
     // Write position starts ahead of read position by latency amount
     // This creates the proper delay for bypass mode
@@ -66,11 +67,12 @@ void HPSSProcessor::reset() noexcept
     // Reset parameter smoothers (20ms for responsive controls)
     tonalGainSmoother_.reset(currentSampleRate_, 0.02);
     noiseGainSmoother_.reset(currentSampleRate_, 0.02);
+    transientGainSmoother_.reset(currentSampleRate_, 0.02);
     
     // Clear buffers
     std::fill(tonalMaskBuffer_.begin(), tonalMaskBuffer_.end(), 0.0f);
     std::fill(noiseMaskBuffer_.begin(), noiseMaskBuffer_.end(), 0.0f);
-    std::fill(tempOutputBuffer_.begin(), tempOutputBuffer_.end(), 0.0f);
+    std::fill(transientMaskBuffer_.begin(), transientMaskBuffer_.end(), 0.0f);
     std::fill(bypassBuffer_.begin(), bypassBuffer_.end(), 0.0f);
 
     // Maintain proper bypass delay offset
@@ -81,45 +83,31 @@ void HPSSProcessor::reset() noexcept
 
 void HPSSProcessor::processBlock(const float* inputBuffer,
                                 float* outputBuffer,
-                                float* tonalBuffer,
-                                float* noiseBuffer,
                                 int numSamples,
                                 float tonalGain,
-                                float noiseGain) noexcept
+                                float noiseGain,
+                                float transientGain) noexcept
 {
     jassert(isInitialized_);
     jassert(inputBuffer != nullptr);
     jassert(outputBuffer != nullptr);
     jassert(numSamples > 0 && numSamples <= currentBlockSize_);
-    
+
     // Handle bypass mode
     if (bypassEnabled_)
     {
         processBypass(inputBuffer, outputBuffer, numSamples);
-        
-        // Clear optional outputs
-        if (tonalBuffer)
-            std::fill_n(tonalBuffer, numSamples, 0.0f);
-        if (noiseBuffer)
-            std::fill_n(noiseBuffer, numSamples, 0.0f);
-        
         return;
     }
-    
-    // Check for unity gain optimization
-    if (tryUnityGainPath(inputBuffer, outputBuffer, numSamples, tonalGain, noiseGain))
+
+    // Check for unity gain optimization (all three streams at unity = transparent passthrough)
+    if (tryUnityGainPath(inputBuffer, outputBuffer, numSamples, tonalGain, noiseGain, transientGain))
     {
-        // Unity gain path taken - copy to optional outputs if needed
-        if (tonalBuffer)
-            juce::FloatVectorOperations::copy(tonalBuffer, inputBuffer, numSamples);
-        if (noiseBuffer)
-            std::fill_n(noiseBuffer, numSamples, 0.0f);
-        
         return;
     }
-    
+
     // Update parameter smoothing
-    updateParameterSmoothing(tonalGain, noiseGain, numSamples);
+    updateParameterSmoothing(tonalGain, noiseGain, transientGain);
 
     // Main processing pipeline
 
@@ -159,29 +147,29 @@ void HPSSProcessor::processBlock(const float* inputBuffer,
         maskEstimator_->updateGuides(magnitudes);
         maskEstimator_->updateStats(magnitudes);
 
-        // Compute separation masks
+        // Compute separation masks (mass-conserving 3-way split)
         maskEstimator_->computeMasks(juce::Span<float>(tonalMaskBuffer_),
+                                     juce::Span<float>(transientMaskBuffer_),
                                      juce::Span<float>(noiseMaskBuffer_));
 
         // Get current smoothed gain values for this frame
-        const float currentTonalGain = tonalGainSmoother_.getCurrentValue();
-        const float currentNoiseGain = noiseGainSmoother_.getCurrentValue();
+        const float currentTonalGain     = tonalGainSmoother_.getCurrentValue();
+        const float currentNoiseGain     = noiseGainSmoother_.getCurrentValue();
+        const float currentTransientGain = transientGainSmoother_.getCurrentValue();
 
         // Advance smoothers by hop size (samples per frame) for correct timing
         const int hopSize = stftProcessor_->getHopSize();
         tonalGainSmoother_.skip(hopSize);
         noiseGainSmoother_.skip(hopSize);
+        transientGainSmoother_.skip(hopSize);
 
-        // Apply masks to magnitudes
+        // Apply masks to magnitudes — sum the three gained streams.
         for (int bin = 0; bin < numBins_; ++bin)
         {
-            // Apply masks with gains
             const float originalMag = magnitudes[bin];
-            const float tonalMag = originalMag * tonalMaskBuffer_[bin] * currentTonalGain;
-            const float noiseMag = originalMag * noiseMaskBuffer_[bin] * currentNoiseGain;
-
-            // Set final magnitude as sum of tonal and noise components
-            magnitudes[bin] = tonalMag + noiseMag;
+            magnitudes[bin] = originalMag * (tonalMaskBuffer_[bin]     * currentTonalGain
+                                           + transientMaskBuffer_[bin] * currentTransientGain
+                                           + noiseMaskBuffer_[bin]     * currentNoiseGain);
         }
 
         // Convert back to complex representation
@@ -204,42 +192,8 @@ void HPSSProcessor::processBlock(const float* inputBuffer,
         applySafetyLimiting(outputBuffer, numSamples);
     }
     
-    // 5. Flush denormals for performance
-    flushDenormals(outputBuffer, numSamples);
-    
-    // 6. Generate separate outputs if requested
-    if (tonalBuffer || noiseBuffer)
-    {
-        // For separate outputs, we need to process the signals again
-        // This is a simplified approach - in practice, you might want to 
-        // store the separated components during the main processing
-        
-        if (tonalBuffer)
-        {
-            // Apply only tonal gain for tonal output
-            // (This is a simplified implementation)
-            juce::FloatVectorOperations::copy(tonalBuffer, outputBuffer, numSamples);
-            
-            const float tonalOnlyGain = tonalGainSmoother_.getCurrentValue();
-            for (int i = 0; i < numSamples; ++i)
-            {
-                tonalBuffer[i] *= tonalOnlyGain / (tonalOnlyGain + noiseGainSmoother_.getCurrentValue());
-            }
-        }
-        
-        if (noiseBuffer)
-        {
-            // Apply only noise gain for noise output
-            // (This is a simplified implementation)
-            juce::FloatVectorOperations::copy(noiseBuffer, outputBuffer, numSamples);
-            
-            const float noiseOnlyGain = noiseGainSmoother_.getCurrentValue();
-            for (int i = 0; i < numSamples; ++i)
-            {
-                noiseBuffer[i] *= noiseOnlyGain / (tonalGainSmoother_.getCurrentValue() + noiseOnlyGain);
-            }
-        }
-    }
+    // Denormal flushing is handled at the hardware level by the host processor's
+    // juce::ScopedNoDenormals (FTZ/DAZ); no manual per-sample flush needed.
 }
 
 // =============================================================================
@@ -276,20 +230,6 @@ int HPSSProcessor::getFftSize() const noexcept
 void HPSSProcessor::setBypass(bool shouldBypass) noexcept
 {
     bypassEnabled_ = shouldBypass;
-}
-
-void HPSSProcessor::setQualityMode(bool highQuality) noexcept
-{
-    if (useHighQuality_ != highQuality)
-    {
-        useHighQuality_ = highQuality;
-
-        if (isInitialized_)
-        {
-            // Reinitialize components with new quality setting
-            initializeComponents();
-        }
-    }
 }
 
 void HPSSProcessor::setSeparation(float amount) noexcept
@@ -343,8 +283,16 @@ juce::Span<const float> HPSSProcessor::getCurrentNoiseMask() const noexcept
 {
     if (noiseMaskBuffer_.empty())
         return {};
-    
+
     return juce::Span<const float>(noiseMaskBuffer_);
+}
+
+juce::Span<const float> HPSSProcessor::getCurrentTransientMask() const noexcept
+{
+    if (transientMaskBuffer_.empty())
+        return {};
+
+    return juce::Span<const float>(transientMaskBuffer_);
 }
 
 // =============================================================================
@@ -379,6 +327,7 @@ void HPSSProcessor::initializeComponents() noexcept
     // Resize mask buffers for new bin count (critical when switching quality modes)
     tonalMaskBuffer_.resize(numBins_, 0.0f);
     noiseMaskBuffer_.resize(numBins_, 0.0f);
+    transientMaskBuffer_.resize(numBins_, 0.0f);
 
     // Resize and reinitialize bypass buffer for new latency
     const int latencyInSamples = getLatencyInSamples();
@@ -388,13 +337,12 @@ void HPSSProcessor::initializeComponents() noexcept
     bypassReadPos_ = 0;
 }
 
-void HPSSProcessor::updateParameterSmoothing(float tonalGain, float noiseGain, int numSamples) noexcept
+void HPSSProcessor::updateParameterSmoothing(float tonalGain, float noiseGain, float transientGain) noexcept
 {
-    // Set target values for smoothers
+    // Set target values for smoothers; advanced per-frame inside processBlock().
     tonalGainSmoother_.setTargetValue(tonalGain);
     noiseGainSmoother_.setTargetValue(noiseGain);
-    
-    // The smoothers will be advanced during processing
+    transientGainSmoother_.setTargetValue(transientGain);
 }
 
 void HPSSProcessor::applySafetyLimiting(float* buffer, int numSamples) noexcept
@@ -426,45 +374,25 @@ void HPSSProcessor::processBypass(const float* inputBuffer, float* outputBuffer,
 }
 
 bool HPSSProcessor::tryUnityGainPath(const float* inputBuffer, float* outputBuffer,
-                                    int numSamples, float tonalGain, float noiseGain) noexcept
+                                    int numSamples,
+                                    float tonalGain, float noiseGain, float transientGain) noexcept
 {
-    // Check if both gains are exactly 1.0 (unity gain)
-    const bool isUnityGain = (std::abs(tonalGain - 1.0f) < kEpsilon) && 
-                            (std::abs(noiseGain - 1.0f) < kEpsilon);
-    
-    if (!isUnityGain)
+    auto nearUnity = [](float v) noexcept { return std::abs(v - 1.0f) < kEpsilon; };
+
+    // All three target gains at unity? (Masks are mass-conserving so unity on
+    // all three reconstructs the input exactly.)
+    if (! (nearUnity(tonalGain) && nearUnity(noiseGain) && nearUnity(transientGain)))
         return false;
-    
-    // Check if smoothers are also at unity gain
-    const bool smoothersAtUnity = (std::abs(tonalGainSmoother_.getCurrentValue() - 1.0f) < kEpsilon) &&
-                                 (std::abs(noiseGainSmoother_.getCurrentValue() - 1.0f) < kEpsilon) &&
-                                 (std::abs(tonalGainSmoother_.getTargetValue() - 1.0f) < kEpsilon) &&
-                                 (std::abs(noiseGainSmoother_.getTargetValue() - 1.0f) < kEpsilon);
-    
-    if (!smoothersAtUnity)
+
+    // And all three smoothers settled at unity (target and current)?
+    if (! (nearUnity(tonalGainSmoother_.getCurrentValue())     && nearUnity(tonalGainSmoother_.getTargetValue())
+        && nearUnity(noiseGainSmoother_.getCurrentValue())     && nearUnity(noiseGainSmoother_.getTargetValue())
+        && nearUnity(transientGainSmoother_.getCurrentValue()) && nearUnity(transientGainSmoother_.getTargetValue())))
         return false;
-    
-    // Unity gain path: bit-perfect copy with latency compensation
+
+    // Bit-perfect passthrough with matched latency.
     processBypass(inputBuffer, outputBuffer, numSamples);
     return true;
 }
 
-void HPSSProcessor::flushDenormals(float* buffer, int numSamples) noexcept
-{
-    for (int i = 0; i < numSamples; ++i)
-    {
-        if (std::abs(buffer[i]) < kDenormalThreshold)
-        {
-            buffer[i] = 0.0f;
-        }
-    }
-}
 
-void HPSSProcessor::mixSignals(float* output, const float* signal1, float gain1,
-                              const float* signal2, float gain2, int numSamples) noexcept
-{
-    for (int i = 0; i < numSamples; ++i)
-    {
-        output[i] = signal1[i] * gain1 + signal2[i] * gain2;
-    }
-}

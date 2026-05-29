@@ -17,30 +17,35 @@ void MagPhaseFrame::fromComplex(juce::Span<const std::complex<float>> complex)
 {
     ensurePrepared();
     validateSpanSize(complex.size());
-    
-    const size_t numBins = magnitudeData_.size();
-    
+
+    const size_t frameBins = magnitudeData_.size();
+    // Clamp to the smaller size so a size mismatch can never read past either
+    // buffer (the throw-based guard was removed for real-time safety).
+    const size_t n = std::min(complex.size(), frameBins);
+
     // Vectorized conversion using JUCE operations where possible
-    for (size_t i = 0; i < numBins; ++i)
+    for (size_t i = 0; i < n; ++i)
     {
         const auto& c = complex[i];
         complexToMagPhase(c, magnitudeData_[i], phaseData_[i]);
     }
-    
+
     // Flush denormals for numerical stability
-    flushDenormals(magnitudeData_.data(), numBins);
-    flushDenormals(phaseData_.data(), numBins);
+    // Denormals are flushed at the hardware level by ScopedNoDenormals in the
+    // host processor's processBlock; no manual per-sample flush needed here.
 }
 
 void MagPhaseFrame::toComplex(juce::Span<std::complex<float>> complex) const
 {
     ensurePrepared();
     validateSpanSize(complex.size());
-    
-    const size_t numBins = magnitudeData_.size();
-    
+
+    // Clamp to the smaller size so a size mismatch can never write/read past
+    // either buffer (the throw-based guard was removed for real-time safety).
+    const size_t n = std::min(complex.size(), magnitudeData_.size());
+
     // Vectorized conversion for perfect reconstruction
-    for (size_t i = 0; i < numBins; ++i)
+    for (size_t i = 0; i < n; ++i)
     {
         complex[i] = magPhaseToComplex(magnitudeData_[i], phaseData_[i]);
     }
@@ -175,39 +180,25 @@ float MagPhaseFrame::calculateEnergy() const noexcept
 
 // === Private Helper Methods ===
 
-void MagPhaseFrame::ensurePrepared() const
+void MagPhaseFrame::ensurePrepared() const noexcept
 {
-    if (!isPrepared())
-    {
-        throw std::runtime_error("MagPhaseFrame: Frame not prepared. Call prepare() first.");
-    }
+    // Real-time safe: assert in debug, no-op in release. This runs on the audio
+    // thread (via fromComplex/toComplex), so it must never throw or allocate.
+    // Callers derive loop bounds from the (possibly empty) buffers, so an
+    // unprepared frame is harmless.
+    jassert(isPrepared());
 }
 
-void MagPhaseFrame::validateSpanSize(size_t spanSize) const
+void MagPhaseFrame::validateSpanSize(size_t spanSize) const noexcept
 {
-    if (spanSize != getNumBins())
-    {
-        throw std::invalid_argument("MagPhaseFrame: Span size (" + std::to_string(spanSize) + 
-                                    ") doesn't match frame size (" + std::to_string(getNumBins()) + ")");
-    }
+    // Real-time safe: assert in debug only. fromComplex/toComplex clamp their
+    // loops to the smaller of the two sizes, so a mismatch cannot read past
+    // either buffer.
+    juce::ignoreUnused(spanSize);
+    jassert(spanSize == getNumBins());
 }
 
-void MagPhaseFrame::flushDenormals(float* data, size_t size) noexcept
-{
-    if (data == nullptr || size == 0) return;
-    
-    // Flush denormals to zero for numerical stability
-    // This prevents CPU performance degradation from denormal processing
-    for (size_t i = 0; i < size; ++i)
-    {
-        if (std::abs(data[i]) < kDenormalThreshold)
-        {
-            data[i] = 0.0f;
-        }
-    }
-}
-
-void MagPhaseFrame::complexToMagPhase(std::complex<float> complex, 
+void MagPhaseFrame::complexToMagPhase(std::complex<float> complex,
                                       float& outMagnitude, 
                                       float& outPhase) noexcept
 {

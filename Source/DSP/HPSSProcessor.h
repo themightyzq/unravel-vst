@@ -41,8 +41,7 @@
  * processor.prepare(48000.0, 512);
  * 
  * // In audio callback:
- * processor.processBlock(inputBuffer, outputBuffer, 
- *                       tonalBuffer, noiseBuffer, numSamples,
+ * processor.processBlock(inputBuffer, outputBuffer, numSamples,
  *                       tonalGain, noiseGain);
  * ```
  */
@@ -88,20 +87,18 @@ public:
      * 5. Reconstruction via MagPhaseFrame and STFTProcessor
      * 
      * @param inputBuffer Input audio samples
-     * @param outputBuffer Mixed output (tonal + noise)  
-     * @param tonalBuffer Isolated tonal component (can be nullptr)
-     * @param noiseBuffer Isolated noise component (can be nullptr)
+     * @param outputBuffer Mixed output (tonal + transient + noise)
      * @param numSamples Number of samples to process
      * @param tonalGain Linear gain for tonal component
-     * @param noiseGain Linear gain for noise component
+     * @param noiseGain Linear gain for noise (sustained / stochastic) component
+     * @param transientGain Linear gain for transient (short / impulsive) component
      */
     void processBlock(const float* inputBuffer,
                      float* outputBuffer,
-                     float* tonalBuffer,    // Optional separate output
-                     float* noiseBuffer,    // Optional separate output  
                      int numSamples,
                      float tonalGain,
-                     float noiseGain) noexcept;
+                     float noiseGain,
+                     float transientGain) noexcept;
 
     // === Latency and Performance Queries ===
     
@@ -146,13 +143,9 @@ public:
     bool isBypassed() const noexcept { return bypassEnabled_; }
     
     /**
-     * Set quality mode for processing.
-     * @param highQuality True for high quality (higher CPU), false for low latency
-     */
-    void setQualityMode(bool highQuality) noexcept;
-    
-    /**
      * Get current quality mode.
+     * Quality (FFT size) is fixed at construction; there is no runtime setter,
+     * so switching never reallocates on the audio thread.
      * @return True if in high quality mode
      */
     bool isHighQuality() const noexcept { return useHighQuality_; }
@@ -249,6 +242,13 @@ public:
      */
     juce::Span<const float> getCurrentNoiseMask() const noexcept;
 
+    /**
+     * Get read-only access to current transient mask for visualization.
+     * Only valid after processing a frame.
+     * @return Span of current transient mask, or empty span if not available
+     */
+    juce::Span<const float> getCurrentTransientMask() const noexcept;
+
 private:
     // === Core Components ===
     std::unique_ptr<STFTProcessor> stftProcessor_;      ///< STFT analysis/synthesis
@@ -278,11 +278,12 @@ private:
     // === Parameter Smoothing ===
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> tonalGainSmoother_;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> noiseGainSmoother_;
-    
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> transientGainSmoother_;
+
     // === Processing Buffers (Real-time Safe) ===
     std::vector<float> tonalMaskBuffer_;                ///< Tonal mask storage
     std::vector<float> noiseMaskBuffer_;                ///< Noise mask storage
-    std::vector<float> tempOutputBuffer_;               ///< Temporary output buffer
+    std::vector<float> transientMaskBuffer_;            ///< Transient mask storage
     std::vector<float> bypassBuffer_;                   ///< Delay buffer for bypass
     
     // === Bypass Implementation ===
@@ -296,23 +297,19 @@ private:
     
     // === Numerical Constants ===
     static constexpr float kEpsilon = 1e-8f;           ///< Minimum value for stability
-    static constexpr float kDenormalThreshold = 1e-30f; ///< Denormal protection
     
     // === Private Methods ===
     
     /**
      * Initialize all components with current configuration.
-     * Called from prepare() and setQualityMode().
+     * Called from prepare() only (non-real-time); never from the audio thread.
      */
     void initializeComponents() noexcept;
     
     /**
-     * Update parameter smoothers for current block.
-     * @param tonalGain Target tonal gain
-     * @param noiseGain Target noise gain
-     * @param numSamples Number of samples in block
+     * Update parameter smoothers for current block (one target per stream).
      */
-    void updateParameterSmoothing(float tonalGain, float noiseGain, int numSamples) noexcept;
+    void updateParameterSmoothing(float tonalGain, float noiseGain, float transientGain) noexcept;
     
     /**
      * Apply safety limiting to prevent clipping.
@@ -357,35 +354,14 @@ private:
     
     /**
      * Apply unity gain transparency optimization.
-     * When both gains are 1.0, this provides bit-perfect passthrough.
-     * @param inputBuffer Input samples
-     * @param outputBuffer Output samples
-     * @param numSamples Number of samples
-     * @param tonalGain Current tonal gain
-     * @param noiseGain Current noise gain
+     * When all three stream gains are 1.0, this provides bit-perfect passthrough
+     * (the three mass-conserving masks sum to 1, so unity-scaled they reconstruct
+     * the input exactly).
      * @return True if unity gain path was used
      */
-    bool tryUnityGainPath(const float* inputBuffer, float* outputBuffer, 
-                         int numSamples, float tonalGain, float noiseGain) noexcept;
+    bool tryUnityGainPath(const float* inputBuffer, float* outputBuffer,
+                         int numSamples,
+                         float tonalGain, float noiseGain, float transientGain) noexcept;
     
-    /**
-     * Flush denormal values to zero for performance.
-     * @param buffer Buffer to process
-     * @param numSamples Number of samples
-     */
-    static void flushDenormals(float* buffer, int numSamples) noexcept;
-    
-    /**
-     * Mix two signals with individual gains.
-     * @param output Output buffer
-     * @param signal1 First signal
-     * @param gain1 Gain for first signal  
-     * @param signal2 Second signal
-     * @param gain2 Gain for second signal
-     * @param numSamples Number of samples
-     */
-    static void mixSignals(float* output, const float* signal1, float gain1,
-                          const float* signal2, float gain2, int numSamples) noexcept;
-
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(HPSSProcessor)
 };

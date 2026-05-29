@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Build script for Unravel plugin
-# Supports macOS (AU/VST3) and Linux (VST3)
+# Builds VST3 + AU (macOS) + Standalone — macOS Universal Binary; VST3 + Standalone on Windows/Linux
 
 set -e
 
@@ -91,9 +91,9 @@ if [ -d "$BUILD_DIR/Unravel_artefacts" ]; then
     fi
     
     if [ -d "$BUILD_DIR/Unravel_artefacts/$BUILD_TYPE/AU" ]; then
-        echo "  AU: $BUILD_DIR/Unravel_artefacts/$BUILD_TYPE/AU/Unravel.component"
+        echo "  AU:   $BUILD_DIR/Unravel_artefacts/$BUILD_TYPE/AU/Unravel.component"
     fi
-    
+
     if [ -d "$BUILD_DIR/Unravel_artefacts/$BUILD_TYPE/Standalone" ]; then
         echo "  Standalone: $BUILD_DIR/Unravel_artefacts/$BUILD_TYPE/Standalone/Unravel.app"
     fi
