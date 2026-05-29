@@ -63,6 +63,5 @@ __pycache__/
 .env
 *.zip
 
-# Developer documentation (not needed for users)
-Documentation/
-docs/
+# docs/ and Documentation/ are tracked — README and CLAUDE.md
+# both reference content inside them. Untracked previously by mistake.

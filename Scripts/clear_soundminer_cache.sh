@@ -1,33 +1,52 @@
 #!/bin/bash
 # Clear Soundminer plugin cache to force a fresh scan
-# This is safe - Soundminer will rebuild the cache on next launch
+# This is safe - Soundminer will rebuild the cache on next launch.
+#
+# Handles both Soundminer V6 and V7 — clears whichever caches are
+# present so users on either version (or mid-migration) get a clean
+# rescan without having to edit this script.
 
-SOUNDMINER_SUPPORT="$HOME/Library/Application Support/SoundminerV6"
-PLUGINS_DB="$SOUNDMINER_SUPPORT/plugins.sqlite"
+set -u
 
+SUPPORT_ROOT="$HOME/Library/Application Support"
+VERSIONS=("SoundminerV7" "SoundminerV6")
+
+cleared=0
 echo "=== Soundminer Plugin Cache Cleaner ==="
 echo ""
 
-if [ -f "$PLUGINS_DB" ]; then
-    echo "Current plugin database:"
-    ls -la "$PLUGINS_DB"
-    echo ""
+for ver in "${VERSIONS[@]}"; do
+    db="$SUPPORT_ROOT/$ver/plugins.sqlite"
+    if [ -f "$db" ]; then
+        echo "Found cache: $db"
+        echo "Backing up to ${db}.backup"
+        cp "$db" "${db}.backup"
+        rm "$db"
+        echo "  removed."
+        echo ""
+        cleared=$((cleared + 1))
+    fi
+done
 
-    echo "Backing up current database..."
-    cp "$PLUGINS_DB" "${PLUGINS_DB}.backup"
-
-    echo "Removing plugin database to force rescan..."
-    rm "$PLUGINS_DB"
-
-    echo "Done! Now:"
+if [ "$cleared" -gt 0 ]; then
+    echo "Cleared $cleared cache(s)."
+    echo "Next steps:"
     echo "  1. Launch Soundminer"
-    echo "  2. Open the DSP Rack (cmd+D)"
+    echo "  2. Open the DSP Rack (Cmd+D)"
     echo "  3. Soundminer will automatically rescan all plugins"
-    echo "  4. Check if Unravel appears in the VST3 section"
+    echo "  4. Confirm Unravel appears under VST3"
     echo ""
-    echo "If needed, restore backup with:"
-    echo "  cp \"${PLUGINS_DB}.backup\" \"$PLUGINS_DB\""
+    echo "Restore from backup if needed:"
+    for ver in "${VERSIONS[@]}"; do
+        backup="$SUPPORT_ROOT/$ver/plugins.sqlite.backup"
+        if [ -f "$backup" ]; then
+            db="${backup%.backup}"
+            echo "  cp \"$backup\" \"$db\""
+        fi
+    done
 else
-    echo "No plugins.sqlite found at expected location."
-    echo "Soundminer will scan plugins on next DSP Rack launch."
+    echo "No Soundminer plugins.sqlite found under either"
+    echo "  $SUPPORT_ROOT/SoundminerV6"
+    echo "  $SUPPORT_ROOT/SoundminerV7"
+    echo "Soundminer will scan plugins on next DSP Rack launch anyway."
 fi
