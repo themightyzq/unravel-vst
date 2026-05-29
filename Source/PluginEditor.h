@@ -4,6 +4,8 @@
 #include "PluginProcessor.h"
 #include "GUI/XYPad.h"
 #include "GUI/SpectrumDisplay.h"
+#include "GUI/Theme.h"
+#include "GUI/CustomLookAndFeel.h"
 
 class UnravelAudioProcessorEditor : public juce::AudioProcessorEditor,
                                     private juce::Timer
@@ -19,6 +21,9 @@ public:
 private:
     UnravelAudioProcessor& audioProcessor;
 
+    // Themed look (applied to the editor, cascades to all child controls).
+    CustomLookAndFeel lookAndFeel;
+
     // Main controls
     std::unique_ptr<XYPad> xyPad;
     std::unique_ptr<SpectrumDisplay> spectrumDisplay;
@@ -26,11 +31,7 @@ private:
     // Header controls
     juce::Label titleLabel;
     juce::TextButton bypassButton;
-    juce::TextButton qualityButton;
-    juce::TextButton debugButton;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> qualityAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> debugAttachment;
 
     // Separation knobs (rotary style)
     juce::Slider separationKnob;
@@ -46,17 +47,27 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> floorAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> brightnessAttachment;
 
-    // Solo/Mute controls
+    // Solo/Mute controls (one S/M pair per stream)
     juce::TextButton soloTonalButton;
     juce::TextButton muteTonalButton;
     juce::TextButton soloNoiseButton;
     juce::TextButton muteNoiseButton;
+    juce::TextButton soloTransientButton;
+    juce::TextButton muteTransientButton;
     juce::Label tonalLabel;
     juce::Label noiseLabel;
+    juce::Label transientFooterLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> soloTonalAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> muteTonalAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> soloNoiseAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> muteNoiseAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> soloTransientAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> muteTransientAttachment;
+
+    // Transient stream gain (vertical fader right of the XY pad)
+    juce::Slider transientGainSlider;
+    juce::Label  transientGainLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> transientGainAttachment;
 
     // Preset dropdown
     juce::ComboBox presetSelector;
@@ -64,10 +75,6 @@ private:
 
     // Spectrum scale toggle
     juce::TextButton scaleToggleButton;
-
-    // Visual feedback
-    float tonalLevel = 0.0f;
-    float noiseLevel = 0.0f;
 
     // Tooltip window (required for tooltips to display)
     // 300ms delay for faster feedback (accessibility improvement)
@@ -77,22 +84,30 @@ private:
     static constexpr int defaultWidth = 520;
     static constexpr int defaultHeight = 650;
 
-    // Colors
-    juce::Colour bgDark{0xff0d0d0d};
-    juce::Colour bgMid{0xff1a1a1a};
-    juce::Colour bgLight{0xff252525};
-    juce::Colour accent{0xff00d4aa};
-    juce::Colour tonalColor{0xff3388ff};
-    juce::Colour noiseColor{0xffff8844};
-    juce::Colour textDim{0xff888888};  // Improved contrast for accessibility
-    juce::Colour textBright{0xffcccccc};
+    // Section heights — single source of truth shared by resized() and
+    // drawSectionDividers() so the dividers can never drift from the sections.
+    static constexpr int headerHeight   = 44;
+    static constexpr int spectrumHeight  = 80;
+    static constexpr int knobAreaHeight  = 100;
+    static constexpr int soloMuteHeight  = 50;
+
+    // Colors (from the shared Theme palette)
+    const juce::Colour bgDark     { Theme::bgDark };
+    const juce::Colour bgMid      { Theme::bgMid };
+    const juce::Colour bgLight    { Theme::bgLight };
+    const juce::Colour accent     { Theme::accent };
+    const juce::Colour tonalColor { Theme::tonal };
+    const juce::Colour noiseColor { Theme::noise };
+    const juce::Colour textDim    { Theme::textDim };
+    const juce::Colour textBright { Theme::textBright };
 
     // Helper methods
     void setupHeader();
     void setupKnobs();
     void setupSoloMute();
     void setupPresets();
-    void loadPreset(float tonalDb, float noiseDb, float separation, float focus, float floor);
+    void loadPreset(float tonalDb, float noiseDb, float transientDb,
+                    float separation, float focus, float floor, float brightness);
     void drawBackground(juce::Graphics& g);
     void drawSectionDividers(juce::Graphics& g);
 

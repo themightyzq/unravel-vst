@@ -1,17 +1,18 @@
 #include "XYPad.h"
+#include "Theme.h"
 #include "../Parameters/ParameterDefinitions.h"
 
 XYPad::XYPad(juce::AudioProcessorValueTreeState& apvts_)
     : apvts(apvts_)
 {
-    // Setup colors - using saturated, high-contrast colors for accessibility
-    backgroundColour = juce::Colour(0xff1a1a1a);
-    gridColour = juce::Colour(0xff404040);
-    thumbColour = juce::Colour(0xff00ffaa);
-    thumbHighlightColour = juce::Colour(0xff00ffdd);
-    tonalColour = juce::Colour(0xff0088ff);   // Vivid blue for colorblind accessibility
-    noiseColour = juce::Colour(0xffff5500);   // Vivid orange for colorblind accessibility
-    textColour = juce::Colour(0xffdddddd);
+    // Colours from the shared Theme palette (one tonal blue / noise orange / accent).
+    backgroundColour = Theme::bgMid;
+    gridColour = Theme::grid;
+    thumbColour = Theme::accent;
+    thumbHighlightColour = Theme::accentHi;
+    tonalColour = Theme::tonal;
+    noiseColour = Theme::noise;
+    textColour = Theme::textBright;
     
     // Get direct parameter pointers
     tonalGainParameter = apvts.getRawParameterValue(ParameterIDs::tonalGain);
@@ -105,9 +106,10 @@ void XYPad::paint(juce::Graphics& g)
     // Using saturated colors with clear axis indicator bars
     auto bounds = getLocalBounds().toFloat();
 
-    // High-saturation colors for accessibility
-    juce::Colour tonalHigh(0xff0088ff);   // Vivid blue
-    juce::Colour noiseHigh(0xffff5500);   // Vivid orange
+    // Use the shared tonal/noise tokens (the gradients and axis bars previously
+    // hardcoded a different blue/orange than the rest of the pad).
+    const juce::Colour tonalHigh = tonalColour;
+    const juce::Colour noiseHigh = noiseColour;
 
     // Strong overlapping gradients - clearly visible even when blended
     // Tonal gradient (left to right) - blue builds toward right
@@ -372,6 +374,8 @@ void XYPad::mouseDoubleClick(const juce::MouseEvent& event)
 
 void XYPad::timerCallback()
 {
+    bool changed = false;
+
     // Smooth animation with adaptive speed
     // Use immediate snapping when close to target (reduces unnecessary motion)
     if (!isDragging)
@@ -381,13 +385,23 @@ void XYPad::timerCallback()
 
         // Snap to position if very close (reduced motion when near target)
         if (distance < 0.001f)
-            currentPosition = targetPosition;
+        {
+            if (currentPosition != targetPosition)
+            {
+                currentPosition = targetPosition;
+                changed = true;
+            }
+        }
         else
+        {
             currentPosition = currentPosition + diff * animationSpeed;
+            changed = true;
+        }
     }
-    else
+    else if (currentPosition != targetPosition)
     {
         currentPosition = targetPosition;
+        changed = true;
     }
 
     // Handle hint text fading
@@ -397,9 +411,12 @@ void XYPad::timerCallback()
         if (elapsed > kHintTimeoutMs)
         {
             // Start fading out
+            const float prevAlpha = hintAlpha_;
             hintAlpha_ = juce::jmax(0.0f, hintAlpha_ - 0.05f);
             if (hintAlpha_ <= 0.0f)
                 showHint_ = false;
+            if (hintAlpha_ != prevAlpha)
+                changed = true;
         }
     }
 
@@ -407,9 +424,13 @@ void XYPad::timerCallback()
     if (panBoundaryFlash_ > 0.0f)
     {
         panBoundaryFlash_ = juce::jmax(0.0f, panBoundaryFlash_ - 0.1f);
+        changed = true;
     }
 
-    repaint();
+    // Only repaint when something actually changed, instead of redrawing the
+    // whole pad 60x/second while idle.
+    if (changed)
+        repaint();
 }
 
 void XYPad::parameterChanged(const juce::String& parameterID, float newValue)
@@ -572,7 +593,7 @@ void XYPad::drawGrid(juce::Graphics& g)
             if (isMajor && zoomLevel_ >= 2.0f && screenPos.x > bounds.getX() + 30.0f && screenPos.x < bounds.getRight() - 30.0f)
             {
                 juce::String label = (db >= 0 ? "+" : "") + juce::String(static_cast<int>(db));
-                g.setColour(tonalColour.withAlpha(0.5f));
+                g.setColour(tonalColour.withAlpha(0.85f));
                 g.drawText(label,
                            juce::Rectangle<float>(screenPos.x - 12.0f, bounds.getBottom() - 24.0f, 24.0f, 10.0f),
                            juce::Justification::centred, false);
@@ -594,7 +615,7 @@ void XYPad::drawGrid(juce::Graphics& g)
             if (isMajor && zoomLevel_ >= 2.0f && screenPos.y > bounds.getY() + 20.0f && screenPos.y < bounds.getBottom() - 40.0f)
             {
                 juce::String label = (db >= 0 ? "+" : "") + juce::String(static_cast<int>(db));
-                g.setColour(noiseColour.withAlpha(0.5f));
+                g.setColour(noiseColour.withAlpha(0.85f));
                 g.drawText(label,
                            juce::Rectangle<float>(bounds.getX() + 4.0f, screenPos.y - 5.0f, 24.0f, 10.0f),
                            juce::Justification::left, false);
@@ -609,7 +630,7 @@ void XYPad::drawGrid(juce::Graphics& g)
     if (visibleMinX <= 0.0f && visibleMaxX >= 0.0f)
     {
         auto screenPos = normalizedToScreen({0.0f, 0.0f});
-        g.setColour(tonalColour.withAlpha(0.6f));
+        g.setColour(tonalColour.withAlpha(0.85f));
         g.drawLine(screenPos.x, bounds.getY(), screenPos.x, bounds.getBottom(), boundaryThickness);
     }
 
@@ -617,7 +638,7 @@ void XYPad::drawGrid(juce::Graphics& g)
     if (visibleMinX <= 1.0f && visibleMaxX >= 1.0f)
     {
         auto screenPos = normalizedToScreen({1.0f, 0.0f});
-        g.setColour(tonalColour.withAlpha(0.6f));
+        g.setColour(tonalColour.withAlpha(0.85f));
         g.drawLine(screenPos.x, bounds.getY(), screenPos.x, bounds.getBottom(), boundaryThickness);
     }
 
@@ -625,7 +646,7 @@ void XYPad::drawGrid(juce::Graphics& g)
     if (visibleMinY <= 0.0f && visibleMaxY >= 0.0f)
     {
         auto screenPos = normalizedToScreen({0.0f, 0.0f});
-        g.setColour(noiseColour.withAlpha(0.6f));
+        g.setColour(noiseColour.withAlpha(0.85f));
         g.drawLine(bounds.getX(), screenPos.y, bounds.getRight(), screenPos.y, boundaryThickness);
     }
 
@@ -633,7 +654,7 @@ void XYPad::drawGrid(juce::Graphics& g)
     if (visibleMinY <= 1.0f && visibleMaxY >= 1.0f)
     {
         auto screenPos = normalizedToScreen({0.0f, 1.0f});
-        g.setColour(noiseColour.withAlpha(0.6f));
+        g.setColour(noiseColour.withAlpha(0.85f));
         g.drawLine(bounds.getX(), screenPos.y, bounds.getRight(), screenPos.y, boundaryThickness);
     }
 }
@@ -668,33 +689,33 @@ void XYPad::drawLabels(juce::Graphics& g)
         };
 
         // Top-left corner: left tonal dB, top noise dB
-        g.setColour(tonalColour.withAlpha(0.6f));
+        g.setColour(tonalColour.withAlpha(0.85f));
         g.drawText("T:" + formatDb(leftTonalDb),
                    juce::Rectangle<float>(bounds.getX() + 4.0f, bounds.getY() + 4.0f, 55.0f, 12.0f),
                    juce::Justification::left, false);
-        g.setColour(noiseColour.withAlpha(0.6f));
+        g.setColour(noiseColour.withAlpha(0.85f));
         g.drawText("N:" + formatDb(topNoiseDb),
                    juce::Rectangle<float>(bounds.getX() + 4.0f, bounds.getY() + 16.0f, 55.0f, 12.0f),
                    juce::Justification::left, false);
 
         // Top-right corner: right tonal dB
-        g.setColour(tonalColour.withAlpha(0.6f));
+        g.setColour(tonalColour.withAlpha(0.85f));
         g.drawText("T:" + formatDb(rightTonalDb),
                    juce::Rectangle<float>(bounds.getRight() - 59.0f, bounds.getY() + 4.0f, 55.0f, 12.0f),
                    juce::Justification::right, false);
 
         // Bottom-left corner: bottom noise dB
-        g.setColour(noiseColour.withAlpha(0.6f));
+        g.setColour(noiseColour.withAlpha(0.85f));
         g.drawText("N:" + formatDb(bottomNoiseDb),
                    juce::Rectangle<float>(bounds.getX() + 4.0f, bounds.getBottom() - 40.0f, 55.0f, 12.0f),
                    juce::Justification::left, false);
 
         // Bottom-right corner: both max values
-        g.setColour(tonalColour.withAlpha(0.6f));
+        g.setColour(tonalColour.withAlpha(0.85f));
         g.drawText("T:" + formatDb(rightTonalDb),
                    juce::Rectangle<float>(bounds.getRight() - 59.0f, bounds.getBottom() - 52.0f, 55.0f, 12.0f),
                    juce::Justification::right, false);
-        g.setColour(noiseColour.withAlpha(0.6f));
+        g.setColour(noiseColour.withAlpha(0.85f));
         g.drawText("N:" + formatDb(bottomNoiseDb),
                    juce::Rectangle<float>(bounds.getRight() - 59.0f, bounds.getBottom() - 40.0f, 55.0f, 12.0f),
                    juce::Justification::right, false);
@@ -1100,7 +1121,7 @@ void XYPad::drawAxisLabels(juce::Graphics& g)
     auto bounds = getLocalBounds().toFloat();
 
     g.setFont(juce::FontOptions(10.0f));
-    g.setColour(textColour.withAlpha(0.4f));
+    g.setColour(textColour.withAlpha(0.7f));
 
     // Bottom axis label: "TONAL" with arrows as < >
     g.drawText("< Tonal >",

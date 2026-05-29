@@ -6,7 +6,7 @@ if(APPLE)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Build architectures for macOS")
 endif()
 
-project(Unravel VERSION 1.0.0)
+project(Unravel VERSION 1.3.0)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
@@ -20,7 +20,7 @@ juce_add_plugin(Unravel
     COMPANY_NAME "ZQ SFX"
     PLUGIN_MANUFACTURER_CODE ZQSF
     PLUGIN_CODE Unrv
-    FORMATS VST3 Standalone
+    FORMATS VST3 AU Standalone
     PRODUCT_NAME "Unravel"
     PLUGIN_NAME "Unravel"
     IS_SYNTH FALSE
@@ -56,12 +56,11 @@ target_sources(Unravel
         Source/DSP/HPSSProcessor.h
         Source/GUI/CustomLookAndFeel.cpp
         Source/GUI/CustomLookAndFeel.h
-        Source/GUI/VerticalSlider.cpp
-        Source/GUI/VerticalSlider.h
         Source/GUI/XYPad.cpp
         Source/GUI/XYPad.h
         Source/GUI/SpectrumDisplay.cpp
         Source/GUI/SpectrumDisplay.h
+        Source/GUI/Theme.h
         Source/Parameters/ParameterDefinitions.h
 )
 

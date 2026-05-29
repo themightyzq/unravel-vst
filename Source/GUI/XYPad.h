@@ -72,8 +72,9 @@ private:
     static constexpr float gridLineOpacity = 0.2f;
     static constexpr int gridDivisions = 8;
     
-    // Animation
-    float animationSpeed = 0.15f;
+    // Animation — settle toward the target in ~5 frames (<100 ms) so the thumb
+    // doesn't visibly trail the actual parameter value after automation/presets.
+    float animationSpeed = 0.4f;
     bool isDragging = false;
     bool hasFocus_ = false;
 

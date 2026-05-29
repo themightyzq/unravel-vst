@@ -54,12 +54,22 @@ public:
     void updateStats(juce::Span<const float> magnitudes) noexcept;
     
     /**
-     * Compute final tonal and noise masks.
-     * Call this after updateGuides() and updateStats().
-     * @param tonalMask Output tonal mask (size: numBins)
-     * @param noiseMask Output noise mask (size: numBins)
+     * Compute final tonal, transient, and noise masks.
+     *
+     * Three-stream Deconstruct-style decomposition:
+     *   tonalMask     — sustained / harmonic content
+     *   transientMask — short broadband onsets (drum hits, plosives, attacks)
+     *   noiseMask     — stochastic broadband residual (air, sustained noise, decay)
+     *
+     * Masks are mass-conserving per bin (tonal + transient + noise = 1) so that
+     * summing all three streams at unity gain reconstructs the original spectrum.
+     *
+     * Call this after updateGuides() and updateStats(). All three spans must
+     * be size numBins.
      */
-    void computeMasks(juce::Span<float> tonalMask, juce::Span<float> noiseMask) noexcept;
+    void computeMasks(juce::Span<float> tonalMask,
+                      juce::Span<float> transientMask,
+                      juce::Span<float> noiseMask) noexcept;
 
     /**
      * Set separation amount (0-1).
@@ -116,6 +126,12 @@ private:
     static constexpr float attackAlpha = 0.5f;       // Fast attack for transient preservation
     static constexpr float releaseAlpha = 0.15f;    // Slow release to reduce pumping
     static constexpr int blurRadius = 1;             // Frequency blur radius (±1 bin)
+
+    // Transient-stream envelope follower (acts on the non-tonal residual).
+    // Fast attack so onsets immediately flag as transient; slow release so the
+    // post-onset energy gradually flows back into the Noise stream.
+    static constexpr float transientAttack  = 0.8f;  // Near-instant rise on a flux spike
+    static constexpr float transientRelease = 0.12f; // ~10 frames (~100 ms at hop 512/48k)
     
     // State variables
     bool isInitialized = false;
@@ -181,6 +197,9 @@ private:
     
     // Previous frame data for EMA smoothing
     std::vector<float> previousSmoothedMask;
+
+    // Per-bin transient envelope follower state (drives the Transient stream).
+    std::vector<float> transientEnv;
     
     // Core HPSS algorithm methods
     

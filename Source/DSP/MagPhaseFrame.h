@@ -182,31 +182,22 @@ private:
     
     // === Constants for Numerical Stability ===
     static constexpr float kEpsilon = 1e-8f;           ///< Minimum magnitude threshold
-    static constexpr float kDenormalThreshold = 1e-30f; ///< Denormal protection threshold
     
     // === Private Helper Methods ===
     
     /**
      * Validate that the frame is prepared for processing.
-     * @throws std::runtime_error if not prepared
+     * Real-time safe: asserts in debug, no-op in release (never throws).
      */
-    void ensurePrepared() const;
-    
+    void ensurePrepared() const noexcept;
+
     /**
      * Validate span size matches frame size.
+     * Real-time safe: asserts in debug, no-op in release (never throws).
+     * Callers clamp their loops, so a mismatch cannot read out of bounds.
      * @param spanSize Size of the span to validate
-     * @throws std::invalid_argument if sizes don't match
      */
-    void validateSpanSize(size_t spanSize) const;
-    
-    /**
-     * Handle denormal values by flushing to zero.
-     * Optimized for vectorized processing.
-     * 
-     * @param data Pointer to float data
-     * @param size Number of elements
-     */
-    static void flushDenormals(float* data, size_t size) noexcept;
+    void validateSpanSize(size_t spanSize) const noexcept;
     
     /**
      * Convert single complex value to magnitude/phase with stability checks.

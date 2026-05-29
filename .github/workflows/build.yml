@@ -65,6 +65,7 @@ jobs:
         run: |
           mkdir -p release
           cp -r build/Unravel_artefacts/Release/VST3/Unravel.vst3 release/
+          cp -r build/Unravel_artefacts/Release/AU/Unravel.component release/
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
