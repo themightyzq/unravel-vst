@@ -125,18 +125,6 @@ void HPSSProcessor::processBlock(const float* inputBuffer,
         // Get current frequency domain frame
         auto complexFrame = stftProcessor_->getCurrentFrame();
 
-        // DEBUG PASSTHROUGH MODE: Skip mask estimation, just pass STFT through
-        if (debugPassthroughEnabled_)
-        {
-            // Just pass the frame through unchanged (identity processing)
-            // This isolates whether distortion is in STFT or mask estimation
-            stftProcessor_->setCurrentFrame(complexFrame);
-
-            // Try to trigger another frame from buffered input
-            stftProcessor_->pushAndProcess(nullptr, 0);
-            continue;
-        }
-
         // Convert to magnitude/phase representation
         magPhaseFrame_->fromComplex(complexFrame);
 
@@ -186,11 +174,9 @@ void HPSSProcessor::processBlock(const float* inputBuffer,
     // 3. Extract output samples from STFT processor
     stftProcessor_->processOutput(outputBuffer, numSamples);
     
-    // 4. Apply safety limiting if enabled (but skip in debug passthrough mode)
-    if (safetyLimitingEnabled_ && !debugPassthroughEnabled_)
-    {
+    // 4. Apply safety limiting
+    if (safetyLimitingEnabled_)
         applySafetyLimiting(outputBuffer, numSamples);
-    }
     
     // Denormal flushing is handled at the hardware level by the host processor's
     // juce::ScopedNoDenormals (FTZ/DAZ); no manual per-sample flush needed.

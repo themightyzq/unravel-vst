@@ -124,7 +124,10 @@ void UnravelAudioProcessorEditor::setupKnobs()
               "Negative = more goes to tonal. Positive = more goes to noise. Zero = balanced.");
     setupKnob(floorKnob, floorLabel, "FLOOR",
               "Noise Floor: Cleans up quiet residue in each component. "
-              "Zero = natural sound. Higher = harder cutoff, more isolation but less natural.");
+              "Zero = natural sound. Higher = harder cutoff, more isolation but less natural. "
+              "Note: pushing the XY pad near a corner automatically lifts the effective "
+              "floor so the corner can reach full isolation — the knob shows your manual "
+              "value; the floor used by the algorithm is max(this, pad asymmetry).");
     setupKnob(brightnessKnob, brightnessLabel, "BRIGHT",
               "Brightness: High shelf filter for adjusting treble after separation. "
               "Negative = darker, Positive = brighter. Zero = no change.");
@@ -221,7 +224,9 @@ void UnravelAudioProcessorEditor::setupSoloMute()
     transientGainSlider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     transientGainSlider.setTooltip("Transient gain: how much of the impulsive content (drum hits, "
                                    "plosives, attacks) passes through. Pull down to soften attacks; "
-                                   "push up to emphasize them.");
+                                   "push up to emphasize them. Note: at the XY pad corners, the "
+                                   "transient stream is implicitly silenced regardless of this "
+                                   "slider — push the pad back toward center to hear it again.");
     addAndMakeVisible(transientGainSlider);
 
     transientGainLabel.setText("TRANS", juce::dontSendNotification);

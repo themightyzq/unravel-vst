@@ -305,15 +305,11 @@ void UnravelAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBloc
         filter.reset();
     }
 
-    // Size the spectrum snapshot to the (now fixed) bin count and clear it.
-    const int snapBins = (!channelProcessors.empty() && channelProcessors[0])
+    // Snapshot vectors are construct-only: sized once in the ctor to numBins,
+    // never reallocated, so the UI reader iterates by .size() without sync.
+    // Only zero contents here; storage identity is stable.
+    [[maybe_unused]] const int snapBins = (!channelProcessors.empty() && channelProcessors[0])
         ? channelProcessors[0]->getNumBins() : numBins;
-    // The snapshot vectors are CONSTRUCT-ONLY — sized once in the ctor to `numBins`
-    // and never reallocated again, so the UI reader can read `.size()` and iterate
-    // without synchronisation. We only zero contents here; storage identity is
-    // stable. (If a low-latency quality mode is ever reintroduced and bin counts
-    // can change at runtime, the snapshot wiring must move to a triple-buffer or
-    // an atomic-swap-of-pointers design.)
     jassert(snapBins == numBins);
     jassert(snapMagnitudes_.size() == static_cast<size_t>(numBins));
     std::fill(snapMagnitudes_.begin(),    snapMagnitudes_.end(),    0.0f);
@@ -390,38 +386,20 @@ void UnravelAudioProcessor::updateParameters() noexcept
         if (! soloTransient) transientGain = 0.0f;
     }
 
-    // Implicit corner isolation for the XY pad — track the transient stream
-    // to the orthogonal axis so dragging to a corner is true "isolate this
-    // stream only" instead of "boost one of the two pad-controlled streams
-    // while the unattributed transient stream keeps playing."
-    //
-    // Why this exists: the pad only writes tonalGain / noisyGain. Material
-    // with high spectral flux (cymbals, sibilants, noisy modulation like
-    // lightsaber whooshes) routes a large share of its energy to the
-    // transient mask. Without this scaling, the pad's "fully tonal" or
-    // "fully noise" corners leave the transient stream at unity, so the
-    // dominant flux-driven content keeps playing and the corner doesn't
-    // sound isolated. Scaling transient by min(tonalGain, noisyGain)
-    // produces:
-    //   - unity-balanced (1, 1):   transient untouched (cap = 1)
-    //   - either corner (1, 0):    transient silenced  (cap = 0)
-    //   - symmetric attenuation:   transient tracks the same level
-    //
-    // Skipped when any stream is soloed — solo is explicit "I want only X"
-    // intent that should override the implicit corner behavior. Otherwise
-    // soloing Transient while the pad is at a corner would silence everything.
+    // Pad-corner transient scaling: pad axes only write tonal/noisy, so
+    // unaddressed transient energy bleeds at the corners. Track transient to
+    // min(tonal, noisy) — corner ⇒ silenced, balanced ⇒ untouched. Cap at
+    // unity so a pad position with both axes above 0 dB doesn't implicitly
+    // amplify transient beyond the user's slider. Solo wins.
     if (! anySolo)
-        transientGain *= std::min(tonalGain, noisyGain);
+        transientGain *= std::min({tonalGain, noisyGain, 1.0f});
 
     if (muteTonal)     tonalGain     = 0.0f;
     if (muteNoise)     noisyGain     = 0.0f;
     if (muteTransient) transientGain = 0.0f;
 
-    // Update the current values for processBlock to use this block.
-    // (Per-stream gain smoothing happens inside each HPSSProcessor;
-    // updateParameterSmoothing is called from its own processBlock with
-    // these values, so the processor-level smoothers that used to live
-    // here would have been redundant — they were removed in v1.3.1.)
+    // Per-stream gain smoothing happens inside each HPSSProcessor; targets
+    // are set from these values via processBlock's updateParameterSmoothing.
     currentTonalGain     = tonalGain;
     currentNoisyGain     = noisyGain;
     currentTransientGain = transientGain;
@@ -429,7 +407,30 @@ void UnravelAudioProcessor::updateParameters() noexcept
     // Update separation parameters (0-100% -> 0-1, -100..+100 -> -1..+1)
     currentSeparation = separationPercent / 100.0f;
     currentFocus = focusValue / 100.0f;
-    currentSpectralFloor = spectralFloorPercent / 100.0f;
+    const float userSpectralFloor = spectralFloorPercent / 100.0f;
+
+    // Pad asymmetry lifts spectralFloor as the pad approaches a corner —
+    // pushing MaskEstimator's mask shape from soft toward harder per-bin
+    // decisions so the user's "isolate this stream" intent translates into
+    // actual silencing of the other streams (soft mask × gain alone only
+    // reaches ~−14 dB attenuation on residual mask values).
+    //
+    // The shaping is intentionally non-linear: (1 − min/max)^4 stays near 0
+    // for moderate asymmetry (so a −3 dB or even −12 dB nudge doesn't
+    // silently override the user's FLOOR setting), then lifts sharply only
+    // as one of the pad gains approaches zero. Skipped when a stream is
+    // soloed — solo is explicit user intent (same exemption as the
+    // transient-corner scaling above). Mute is NOT exempted: muting a
+    // stream is itself "isolate the others," which is exactly what the
+    // floor lift helps achieve.
+    const float maxPadGain = std::max(currentTonalGain, currentNoisyGain);
+    float cornerFactor = 0.0f;
+    if (! anySolo && maxPadGain > 1e-9f)
+    {
+        const float asymmetry = 1.0f - std::min(currentTonalGain, currentNoisyGain) / maxPadGain;
+        cornerFactor = asymmetry * asymmetry * asymmetry * asymmetry;  // ^4 shaping
+    }
+    currentSpectralFloor = std::max(userSpectralFloor, cornerFactor);
 
     // Apply separation/focus/floor to all channel processors.
     // Quality (FFT size) is fixed at construction in prepareToPlay, so nothing
@@ -536,13 +537,8 @@ void UnravelAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buff
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
         buffer.clear(i, 0, numSamples);
 
-    // Set bypass on each HPSSProcessor once before the loop (not per-channel
-    // per-block). The HPSS processor's own bypass keeps the bypass-buffer
-    // write/read pointers advancing in lockstep with the (unused) STFT path
-    // so output stays aligned with setLatencySamples-reported PDC. Without
-    // this override JUCE's default would output zero-latency audio while
-    // the host's PDC graph still expects ~1536 samples of delay, breaking
-    // parallel-route alignment.
+    // Route through HPSS's bypass delay so output stays PDC-aligned with
+    // setLatencySamples (JUCE's default zeros output and breaks parallel routes).
     for (auto& processor : channelProcessors)
         if (processor) processor->setBypass(true);
 
@@ -567,16 +563,10 @@ void UnravelAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buff
         processor.processBlock(inputData, outputData, numSamples, 1.0f, 1.0f, 1.0f);
     }
 
-    // Deliberately do NOT drain snapRequested_ here. While host-bypassed,
-    // each HPSSProcessor's internal smoothers get their targets set to 1.0
-    // by the unity-gain pass through processor.processBlock above, so a
-    // snap applied during bypass would be immediately overwritten. Holding
-    // the flag pending means the first un-bypassed processBlock applies
-    // the snap once updateParameters() has refreshed currentXxx — which is
-    // when the snapped values are actually about to be used.
+    // Do NOT drain snapRequested_ here — bypass overwrites smoother targets
+    // with 1.0, so the snap is deferred to the first un-bypassed processBlock.
 
-    // Publish a (zero-valued) snapshot so the UI shows the bypassed state
-    // honestly rather than the last pre-bypass frame.
+    // Publish zero-valued snapshot so the UI reflects bypass state honestly.
     publishSpectrumSnapshot(true);
 }
 
@@ -609,14 +599,8 @@ void UnravelAudioProcessor::setStateInformation (const void* data, int sizeInByt
         if (xmlState->hasTagName (apvts.state.getType()))
             apvts.replaceState (juce::ValueTree::fromXml (*xmlState));
 
-    // After replaceState, the smoothers still hold their pre-load targets and
-    // would ramp into the new values over 20 ms — audible as a swoosh on
-    // brightness or a click on gains when the transport is rolling at restore.
-    // The brightness IIR also carries history from the prior session's audio.
-    // Request the audio thread to snap both on the next processBlock.
-    // (Doing the snap directly here would race processBlock's reads of the
-    // smoothers and the IIR state, and IIR::Filter::reset() can reach a
-    // conditional allocation — see header comment on requestParameterStateSnap.)
+    // Snap smoothers + brightness IIR to the loaded state on next processBlock
+    // (avoids swoosh/click when transport is rolling at restore).
     requestParameterStateSnap();
 }
 

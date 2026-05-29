@@ -122,7 +122,6 @@ private:
     static constexpr float flatnessWeight = 0.15f;   // γ: Spectral flatness weight
     
     // Post-processing parameters
-    static constexpr float emaAlpha = 0.3f;          // EMA smoothing coefficient (20-40ms time constant)
     static constexpr float attackAlpha = 0.5f;       // Fast attack for transient preservation
     static constexpr float releaseAlpha = 0.15f;    // Slow release to reduce pumping
     static constexpr int blurRadius = 1;             // Frequency blur radius (±1 bin)
@@ -228,12 +227,6 @@ private:
     void computeSpectralFlatness() noexcept;
     
     // Post-processing methods
-    
-    /**
-     * Apply temporal smoothing using exponential moving average.
-     * Uses optimized EMA with 20-40ms time constant.
-     */
-    void applyTemporalSmoothing() noexcept;
 
     /**
      * Apply asymmetric temporal smoothing for dramatic separation.

@@ -117,6 +117,10 @@ For a full walk-through of every control, see [**docs/USER_GUIDE.md**](docs/USER
 - **DAWs**: Logic Pro (AU), Ableton Live, Cubase, Reaper, FL Studio, Soundminer, and other VST3 hosts. (Pro Tools requires AAX and is not currently supported.)
 - **Sample Rates**: 44.1kHz – 192kHz
 
+### Upgrading from v1.3.0
+
+v1.3.1 changes the AU subtype code from `Unrv` to `UnRv` to satisfy Apple's "at least one uppercase character" requirement. **This is an AU identity change**: Logic Pro and other AU hosts cache plugins by `(manufacturer, subtype, version)`, so v1.3.0 saved sessions will report "plugin not found" for the AU. Resaving the project under v1.3.1 puts the new identity into the session. VST3 sessions are unaffected. If you don't see the plugin in Logic at all after upgrade, run `killall -9 AudioComponentRegistrar` and reopen Logic to flush the AU cache.
+
 ## License
 
 This project is licensed under the **GNU General Public License v3.0** - see the [LICENSE](LICENSE) file for details.

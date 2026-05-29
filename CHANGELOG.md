@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+Follow-up to the v1.3.1 audit-fix pass, addressing user feedback that "fully noise" on a pitched modulated source (drone-style content) wasn't silencing tonality. The root cause is structural: soft-mask × per-stream-gain mathematically tops out at about −14 dB attenuation on bins dominated by the other stream, so the pad corners couldn't reach isolation regardless of how the masks were classified. Adds an architectural coupling that translates pad asymmetry into spectral-floor lift (mask binarisation at the corners) and reverts two unvalidated DSP changes from the v1.3.1 series.
+
+### Fixed
+
+- **XY pad corners now reach stronger isolation via spectralFloor coupling.** The processor now computes a non-linear `cornerFactor` from pad asymmetry and lifts `spectralFloor = max(userSpectralFloor, cornerFactor)`. Specifically: `cornerFactor = ((1 − min(tg, ng) / max(tg, ng))^4)`, gated off when any stream is soloed. The `^4` shaping means moderate pad nudges (down to about −12 dB on one axis) produce <2 % lift — the user's manual FLOOR setting still wins. Only as the pad approaches an actual corner does cornerFactor climb sharply, pushing `MaskEstimator::applySpectralFloor` to harden its per-bin decisions. The mask cubic at threshold = 1.0 is *not* a pure binarisation (bins very near 0.5 stay near 0.5; bins above 0.5 ease cubically toward 1, bins below 0.5 ease cubically toward 0), so the audible effect at corners is "more decisive isolation than the soft-mask × gain residue alone would allow" rather than absolute silence. For pitched modulated material where the algorithm's tonal mask peaks around 0.8 (rather than 0.99), this strengthens the user's intent at the corners without producing the digital-edge artifacts a true hard mask would.
+
+### Reverted
+
+- **Mask post-3-stream sharpening** (`m_i' = m_i² / Σ m_j²` at `MaskEstimator::computeMasks`). Overcorrected mid-Wiener bins (a wienerGain ≈ 0.5 bin was being pushed to ~99.5% noise share, then amplified at "fully noise" gain — bleed). No empirical validation that it helped on real material.
+- **`spectralFlux` detrending against `horizontalGuide`.** Conceptually defensible but didn't address the user's symptom in listening tests; reverted to the original frame-to-frame measure pending a real measurement-driven re-do.
+
+### Cleanup
+
+- Deleted dead `MaskEstimator::applyTemporalSmoothing()` and the unused `emaAlpha` constant.
+- Deleted dead `HPSSProcessor::setDebugPassthrough` / `isDebugPassthroughEnabled` / `debugPassthroughEnabled_` machinery and the two reachable `if (debugPassthroughEnabled_)` branches in `processBlock`.
+- Deleted the stale "empirical fftSize/4 testing" comment block in `STFTProcessor::calculateWindowScaling`. The actual scaling (`synthesisScale = 2/3` for Hann² at 75% overlap, fftCompensation = 1.0 because JUCE's inverse FFT applies 1/N internally) is correct as written; the contradictory commentary just misled every reviewer who came after.
+- Fixed the lying docstring for `maskExponent` curve (says "0.5 → 1.3"; actual value is 1.98).
+- Trimmed several AI-generated comment blocks in `PluginProcessor.cpp` and `MaskEstimator.cpp` that restated the code or memorialised removed members.
+- Silenced the `snapBins` `-Wunused-variable` warning in Release builds with `[[maybe_unused]]`.
+
+### Documentation
+
+- README "Compatibility" section now documents the AU identity change in v1.3.1 (`Unrv → UnRv`), with the `killall AudioComponentRegistrar` recipe for Logic users who don't see the plugin after upgrade.
+- Updated the Transient slider tooltip to mention that at XY pad corners the stream is implicitly silenced regardless of the slider value.
+
+### Deferred (audit items not done this round)
+
+- Reducing per-stream max gain from +12 dB → +6 dB. Documented in the audit as a way to make corner A/B honest, but the underlying claim (limiter compression masks the algorithm) is hypothesis-not-measurement. Would also clamp existing sessions saved with higher gains. Will revisit once we have empirical limiter activity data.
+- Cutting git tags for v1.2.0 / v1.3.0 / v1.3.1. Release workflow has never fired since v1.1.0; needs a coordinated tag-and-release pass with proper release notes.
+
 ## [1.3.1] - 2026-05-29
 
 Audit-fix pass against the post-v1.3.0 tree (see `REVIEW-AUDIO.md` / `TODO.md` 2026-05-29 entries). Distribution and host-integration correctness; STFT-knot DSP fixes (A29-C1/C4/C5/C6) intentionally deferred to a follow-up PR gated on the `stft-validator` agent.
