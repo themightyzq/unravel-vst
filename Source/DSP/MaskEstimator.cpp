@@ -237,51 +237,6 @@ void MaskEstimator::computeMasks(juce::Span<float> tonalMask,
         noiseMask[i]     = nonTonal * (1.0f - tr);
     }
 
-    // Sharpen the three-stream split: pow + renormalize so the bin's dominant
-    // mask pushes much closer to 1 and the others toward 0. Without this, a
-    // tonal-dominant bin can only have tonalMask ≤ wienerGain (Wiener step is
-    // pow(wienerGain, maskExp) ≤ wienerGain since wienerGain ≤ 1), so for a
-    // typical drone bin tonalMask peaks around 0.8 and ~0.2 of the energy
-    // leaks into noise/transient. That makes "fully noise" / "fully tonal"
-    // gain corners asymmetric: pushing the dominant stream is dramatic
-    // (+10 dB or more), but suppressing the SAME bin via the orthogonal
-    // gain only gets you the residual ~20 % × the new stream's gain — not
-    // enough to silence a clearly tonal source on a "fully noise" corner.
-    //
-    // pow + renormalize preserves mass-conservation: t/Z + x/Z + n/Z = 1
-    // for Z = t + x + n. At a perfectly balanced bin (0.33, 0.33, 0.33)
-    // the operation is a no-op. The further from balance, the more
-    // decisive the bin becomes.
-    //
-    // Exponent 2.0 is a moderate choice — empirically the tonal mask
-    // for a 0.95 wienerGain drone bin goes from 0.81 → 0.97, and the
-    // noise share drops from ~0.15 → ~0.03. "Fully noise" then
-    // attenuates the drone by ~−27 dB instead of ~−5 dB. Higher
-    // exponents are sharper but risk audible mask-edge artifacts on
-    // dense / fast material.
-    {
-        constexpr float sharpenExp = 2.0f;
-        constexpr float sharpenFloor = 1.0e-12f;
-        for (int i = 0; i < numBins; ++i)
-        {
-            const float t = std::pow(std::max(tonalMask[i],     0.0f), sharpenExp);
-            const float x = std::pow(std::max(transientMask[i], 0.0f), sharpenExp);
-            const float n = std::pow(std::max(noiseMask[i],     0.0f), sharpenExp);
-            const float Z = t + x + n;
-            if (Z > sharpenFloor)
-            {
-                const float invZ = 1.0f / Z;
-                tonalMask[i]     = t * invZ;
-                transientMask[i] = x * invZ;
-                noiseMask[i]     = n * invZ;
-            }
-            // else: degenerate (all three masks vanish — happens only on
-            // numerically-zero magnitudes); leave as-is so a downstream
-            // unity-magnitude sanity remains. The audio impact is nil
-            // because the magnitudes are also zero on such bins.
-        }
-    }
-
     // Store smoothed mask for next frame
     juce::FloatVectorOperations::copy(previousSmoothedMask.data(), smoothedMask.data(), numBins);
 }
