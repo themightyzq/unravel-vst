@@ -261,10 +261,9 @@ void UnravelAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBloc
         channelProcessors.push_back(std::move(processor));
     }
     
-    // Setup parameter smoothers (20ms smoothing time)
-    tonalGainSmoothed.reset(sampleRate, 0.02);
-    noisyGainSmoothed.reset(sampleRate, 0.02);
-    transientGainSmoothed.reset(sampleRate, 0.02);
+    // (Per-stream gain smoothers live inside each HPSSProcessor; reset
+    // there in HPSSProcessor::prepare() above. No processor-level smoothers
+    // to set up here.)
 
     // Initialize brightness filter (post-processing high shelf)
     brightnessParam_ = apvts.getRawParameterValue(ParameterIDs::brightness);
@@ -283,6 +282,15 @@ void UnravelAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBloc
     // Build the high-shelf coefficient table once (allocates here, never on the audio thread)
     // and point the filters at the entry matching the current parameter value.
     rebuildBrightnessTable(sampleRate);
+    // Enforce the invariant the audio-thread snap path relies on: every entry
+    // in brightnessCoeffTable_ must be order-2, so juce::dsp::IIR::Filter::reset()
+    // can be called from the audio thread (via applyParameterStateSnapOnAudioThread)
+    // without triggering its conditional state-resize allocation.
+    for ([[maybe_unused]] const auto& coeffs : brightnessCoeffTable_)
+    {
+        jassert(coeffs != nullptr);
+        jassert(coeffs->getFilterOrder() == 2);
+    }
     for (auto& filter : brightnessFilters_)
     {
         filter.coefficients = brightnessCoeffTable_[static_cast<size_t>(brightnessTableIndex(initialBrightness))];
@@ -382,12 +390,11 @@ void UnravelAudioProcessor::updateParameters() noexcept
     if (muteNoise)     noisyGain     = 0.0f;
     if (muteTransient) transientGain = 0.0f;
 
-    // Set target values for smoothers
-    tonalGainSmoothed.setTargetValue(tonalGain);
-    noisyGainSmoothed.setTargetValue(noisyGain);
-    transientGainSmoothed.setTargetValue(transientGain);
-
-    // Update the current values for processBlock to use this block
+    // Update the current values for processBlock to use this block.
+    // (Per-stream gain smoothing happens inside each HPSSProcessor;
+    // updateParameterSmoothing is called from its own processBlock with
+    // these values, so the processor-level smoothers that used to live
+    // here would have been redundant — they were removed in v1.3.1.)
     currentTonalGain     = tonalGain;
     currentNoisyGain     = noisyGain;
     currentTransientGain = transientGain;
@@ -436,7 +443,14 @@ void UnravelAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     
     // Update parameters once per block - this gets the current target values
     updateParameters();
-    
+
+    // Pick up any pending message-thread snap request now that the smoother
+    // targets reflect the freshly-loaded APVTS values. acquire-exchange
+    // pairs with the release-store in requestParameterStateSnap. Snap is
+    // applied at most once per request (false → true once observed).
+    if (snapRequested_.exchange(false, std::memory_order_acq_rel))
+        applyParameterStateSnapOnAudioThread();
+
     // Process each channel with HPSS separation
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
@@ -481,6 +495,64 @@ void UnravelAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     }
 }
 
+void UnravelAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer,
+                                                   juce::MidiBuffer& midiMessages)
+{
+    juce::ignoreUnused(midiMessages);
+    juce::ScopedNoDenormals noDenormals;
+
+    const auto totalNumInputChannels  = getTotalNumInputChannels();
+    const auto totalNumOutputChannels = getTotalNumOutputChannels();
+    const int  numSamples             = buffer.getNumSamples();
+
+    // Clear unused output channels.
+    for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
+        buffer.clear(i, 0, numSamples);
+
+    // Set bypass on each HPSSProcessor once before the loop (not per-channel
+    // per-block). The HPSS processor's own bypass keeps the bypass-buffer
+    // write/read pointers advancing in lockstep with the (unused) STFT path
+    // so output stays aligned with setLatencySamples-reported PDC. Without
+    // this override JUCE's default would output zero-latency audio while
+    // the host's PDC graph still expects ~1536 samples of delay, breaking
+    // parallel-route alignment.
+    for (auto& processor : channelProcessors)
+        if (processor) processor->setBypass(true);
+
+    // Route input through the in-plugin bypass delay line on each channel.
+    for (int channel = 0; channel < totalNumInputChannels; ++channel)
+    {
+        if (channel >= static_cast<int>(channelProcessors.size()))
+        {
+            // No processor for this channel (e.g. between releaseResources
+            // and the next prepareToPlay). Zero the output rather than
+            // leaving stale input in the buffer.
+            buffer.clear(channel, 0, numSamples);
+            continue;
+        }
+
+        auto& processor = *channelProcessors[channel];
+        const float* inputData  = buffer.getReadPointer(channel);
+        float*       outputData = buffer.getWritePointer(channel);
+        // Pass unity gains: HPSS's bypass path short-circuits to the delay
+        // line regardless, but call it consistently with the active
+        // processBlock so future maintenance doesn't drift.
+        processor.processBlock(inputData, outputData, numSamples, 1.0f, 1.0f, 1.0f);
+    }
+
+    // Deliberately do NOT drain snapRequested_ here. While host-bypassed,
+    // each HPSSProcessor's internal smoothers get their targets set to 1.0
+    // by the unity-gain pass through processor.processBlock above, so a
+    // snap applied during bypass would be immediately overwritten. Holding
+    // the flag pending means the first un-bypassed processBlock applies
+    // the snap once updateParameters() has refreshed currentXxx — which is
+    // when the snapped values are actually about to be used.
+
+    // Publish a (zero-valued) snapshot so the UI shows the bypassed state
+    // honestly rather than the last pre-bypass frame.
+    publishSpectrumSnapshot(true);
+}
+
 // Note: The HPSSProcessor provides a much simpler and more efficient interface
 // compared to the previous SinusoidalModelProcessor, with superior audio quality
 // and dramatically reduced CPU usage through optimized HPSS algorithm.
@@ -505,10 +577,57 @@ void UnravelAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 void UnravelAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     std::unique_ptr<juce::XmlElement> xmlState (getXmlFromBinary (data, sizeInBytes));
-    
+
     if (xmlState.get() != nullptr)
         if (xmlState->hasTagName (apvts.state.getType()))
             apvts.replaceState (juce::ValueTree::fromXml (*xmlState));
+
+    // After replaceState, the smoothers still hold their pre-load targets and
+    // would ramp into the new values over 20 ms — audible as a swoosh on
+    // brightness or a click on gains when the transport is rolling at restore.
+    // The brightness IIR also carries history from the prior session's audio.
+    // Request the audio thread to snap both on the next processBlock.
+    // (Doing the snap directly here would race processBlock's reads of the
+    // smoothers and the IIR state, and IIR::Filter::reset() can reach a
+    // conditional allocation — see header comment on requestParameterStateSnap.)
+    requestParameterStateSnap();
+}
+
+void UnravelAudioProcessor::requestParameterStateSnap() noexcept
+{
+    // Release pairs with the audio thread's acquire-exchange in processBlock
+    // so the APVTS values published by replaceState above are visible when
+    // the snap is applied.
+    snapRequested_.store(true, std::memory_order_release);
+}
+
+void UnravelAudioProcessor::applyParameterStateSnapOnAudioThread() noexcept
+{
+    // Audio-thread side of the snap. Callers (processBlock / processBlockBypassed)
+    // are responsible for ensuring updateParameters() has run for this block
+    // first so the currentXxx caches reflect the freshly-loaded APVTS values.
+
+    // Snap each HPSSProcessor's INTERNAL gain smoothers — those are the ones
+    // actually advanced per-frame in HPSSProcessor::processBlock. (The
+    // PluginProcessor previously also carried three SmoothedValue members
+    // with the same names; those were dead state from an earlier refactor
+    // and have been removed.)
+    for (auto& processor : channelProcessors)
+        if (processor)
+            processor->snapGainSmoothers(currentTonalGain,
+                                          currentNoisyGain,
+                                          currentTransientGain);
+
+    if (brightnessParam_ != nullptr)
+        brightnessGainSmoother_.setCurrentAndTargetValue(brightnessParam_->load());
+
+    // brightnessFilters_[].reset() can reach a conditional malloc if the
+    // filter's coefficient ORDER changed since prepare(). Enforced by the
+    // jassert in prepareToPlay: every entry of brightnessCoeffTable_ is an
+    // order-2 high shelf built by makeHighShelf, so the order is invariant
+    // and reset() is allocation-free here.
+    for (auto& filter : brightnessFilters_)
+        filter.reset();
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

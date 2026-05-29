@@ -4,9 +4,26 @@ cmake_minimum_required(VERSION 3.22)
 # Must be set BEFORE project() to take effect
 if(APPLE)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Build architectures for macOS")
+    # Deployment target must be set BEFORE project() so the recorded
+    # LC_BUILD_VERSION pins what users can install on. Without this, CI
+    # binaries inherit the runner's SDK default (currently macOS 14+ on
+    # macos-latest) and would refuse to load on older systems.
+    #
+    # 11.0 is the hard floor for Universal Binaries: arm64's minimum is
+    # macOS 11 (Big Sur, the first arm64 OS), and a Universal Binary's
+    # effective minos is the max of all slice minimums. Setting this lower
+    # is silently overridden by the linker. If we ever drop the arm64
+    # slice, this can be lowered to 10.13.
+    # No FORCE — a developer passing -DCMAKE_OSX_DEPLOYMENT_TARGET=... should
+    # be able to override this for local testing. CI uses the default.
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
 endif()
 
-project(Unravel VERSION 1.3.0)
+# 1.3.1: audit-fix pass — host-bypass PDC, preset-load snap, deployment
+# target pinned, AU subtype identity changed (Unrv → UnRv). The AU identity
+# change requires a version bump so Logic's (mfr, subtype, version) AU cache
+# refreshes instead of colliding with the 1.3.0 entry.
+project(Unravel VERSION 1.3.1)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
@@ -15,11 +32,25 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Add JUCE
 add_subdirectory(JUCE)
 
+# Resolve COPY_PLUGIN_AFTER_BUILD before juce_add_plugin reads it.
+# In CI the system plugin folder is unwritable (Windows requires admin) and
+# uninteresting (CI uploads artefacts rather than installing).
+if(DEFINED ENV{CI})
+    set(UNRAVEL_COPY_PLUGIN_AFTER_BUILD FALSE)
+else()
+    set(UNRAVEL_COPY_PLUGIN_AFTER_BUILD TRUE)
+endif()
+
 # Define the plugin
 juce_add_plugin(Unravel
     COMPANY_NAME "ZQ SFX"
     PLUGIN_MANUFACTURER_CODE ZQSF
-    PLUGIN_CODE Unrv
+    # AU subtype: 4 chars, at least one uppercase per Apple's AU spec.
+    # The earlier "Unrv" was tolerated by auval but caused case-fold collisions
+    # in some host AU caches on re-install. v1.3.x onward: "UnRv". This is an
+    # AU identity change — old sessions referring to "Unrv" will not find the
+    # plugin until resaved.
+    PLUGIN_CODE UnRv
     FORMATS VST3 AU Standalone
     PRODUCT_NAME "Unravel"
     PLUGIN_NAME "Unravel"
@@ -28,8 +59,17 @@ juce_add_plugin(Unravel
     NEEDS_MIDI_OUTPUT FALSE
     IS_MIDI_EFFECT FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE
-    COPY_PLUGIN_AFTER_BUILD TRUE
-    VST3_CATEGORIES "Fx" "Spectral"
+    # COPY_PLUGIN_AFTER_BUILD installs to the system plugin folder after a
+    # local build. Enabled for developer ergonomics; suppressed in CI where
+    # the system path is unwritable on Windows (admin required) and
+    # uninteresting on all platforms (CI uploads artefacts, doesn't install).
+    # JUCE evaluates this argument at configure time, so a generator
+    # expression won't gate the post-build step — use a plain bool.
+    COPY_PLUGIN_AFTER_BUILD ${UNRAVEL_COPY_PLUGIN_AFTER_BUILD}
+    # VST3 subcategories must use Steinberg SDK names so hosts can route
+    # correctly. "Spectral" is non-standard; HPSS source separation is closest
+    # to Restoration, and brightness adds an EQ stage.
+    VST3_CATEGORIES "Fx" "Restoration" "EQ"
     COMPANY_WEBSITE "https://zqsfx.com"
     COMPANY_EMAIL "support@zqsfx.com"
     BUNDLE_ID "com.zqsfx.unravel"

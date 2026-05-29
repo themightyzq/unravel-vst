@@ -6,7 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-(Nothing yet.)
+## [1.3.1] - 2026-05-29
+
+Audit-fix pass against the post-v1.3.0 tree (see `REVIEW-AUDIO.md` / `TODO.md` 2026-05-29 entries). Distribution and host-integration correctness; STFT-knot DSP fixes (A29-C1/C4/C5/C6) intentionally deferred to a follow-up PR gated on the `stft-validator` agent.
+
+Version is bumped for the AU identity change below — Logic's AU cache hashes `(manufacturer, subtype, version)`, so the new subtype must come with a new version to refresh the cache cleanly.
+
+### Fixed
+
+- **Host bypass now preserves the plugin's PDC latency.** Overrode `processBlockBypassed` to route input through the in-plugin bypass delay line (`HPSSProcessor::processBypass`). Without this, JUCE's default would output zero-latency audio while the host's PDC graph still expects ~32 ms of delay, smearing parallel routes. (A29-C3)
+- **Preset switch and session restore no longer swoosh up to the new value.** New public `requestParameterStateSnap()` flags an audio-thread snap of gain smoothers, the brightness smoother, and the brightness IIR's history. The audio thread picks the flag up on the next `processBlock` (well under the 20 ms ramp it suppresses) and applies the snap from the audio thread, so it stays RT-safe and cannot race processBlock's reads. Called from `setStateInformation` after `replaceState` and from the editor's preset loader after writing all parameters. (A29-C7)
+
+### Changed
+
+- **macOS minimum is now 11.0** (was claimed 10.13). Set `CMAKE_OSX_DEPLOYMENT_TARGET=11.0` explicitly, before `project()`, so the binary's `LC_BUILD_VERSION` matches reality. 11.0 is the hard floor for Universal Binaries on current Xcode — arm64's minimum is macOS 11 (Big Sur), and a fat binary's effective minos is the max of all slice minimums. Lower targets would silently be overridden by the linker. (A29-C8)
+- **VST3 subcategories** changed from `"Fx" "Spectral"` to `"Fx" "Restoration" "EQ"` (Steinberg-recognised constants). Cubase / Nuendo / Studio One can now route the plugin into the Restoration category instead of dropping it under generic "Fx". (A29-H10)
+- **AU subtype code** changed from `Unrv` to `UnRv`. Apple's AU spec requires at least one uppercase character in the 4-char subtype; the old code was tolerated by `auval` but could collide in case-folding host AU caches on re-install. **This is an AU identity change** — sessions saved with v1.3.0's `Unrv` will not find the plugin under the new code; users will need to resave their tracks. (A29-H11)
+- **`COPY_PLUGIN_AFTER_BUILD`** is now gated to non-CI builds. Suppresses the post-build copy-to-system-plugin-folder step on CI runners, where the destination (e.g. `C:\Program Files\Common Files\VST3\` on Windows) requires elevation.
+
+### CI / build
+
+- **macOS CI now ad-hoc signs** VST3, AU and Standalone bundles (`codesign --force --sign - --timestamp=none`) with `--verify` confirmations. `--deep` is intentionally omitted — Apple deprecated it; the three bundles have no nested helpers so signing the top of each is enough. Ad-hoc signing reduces "damaged" false-positives on macOS 14+ and is required for arm64 JIT paths some JUCE modules can hit. Users still need to clear quarantine on first install (`xattr -dr com.apple.quarantine <bundle>`). Notarization remains intentionally out of CI (per CLAUDE.md §E.3). (A29-H12)
+- **Universal Binary verification** added to macOS CI. `lipo -archs ... | grep -qE "(x86_64.*arm64|arm64.*x86_64)"` runs against both bundles before codesign; the macOS job fails if either is single-arch. Closes the silent-regression risk where a future change to `CMAKE_OSX_ARCHITECTURES` would ship arm64-only artefacts to Soundminer. (A29-H13)
+- **CI packaging uses `ditto`** instead of `cp -r` for the macOS artefacts, so xattrs (including the just-applied ad-hoc signature) survive the GitHub Actions zip step.
 
 ## [1.3.0] - 2026-05-28
 

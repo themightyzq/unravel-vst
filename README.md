@@ -2,7 +2,7 @@
 
 **Three-stream Spectral Decomposition Plugin — Tonal / Transient / Noise**
 
-![Unravel Plugin Interface](assets/screenshot.png?v=1.3.0)
+![Unravel Plugin Interface](assets/screenshot.png?v=1.3.1)
 
 Unravel is a real-time audio plugin that splits a sound into three streams — **Tonal** (sustained / harmonic), **Transient** (drum hits, plosives, consonants, attacks), and **Noise** (stochastic / textural residual) — and lets you re-mix them. Same conceptual structure as iZotope RX's *Deconstruct* module, but real-time and DAW-resident.
 
@@ -112,7 +112,7 @@ For a full walk-through of every control, see [**docs/USER_GUIDE.md**](docs/USER
 ## Compatibility
 
 - **Formats**: VST3 (all platforms); Audio Unit / AU (macOS)
-- **Platforms**: macOS 10.13+ (Universal Binary), Windows 10+, Linux
+- **Platforms**: macOS 11.0+ (Universal Binary, arm64 + x86_64), Windows 10+, Linux
 - **Channel layouts**: mono and stereo
 - **DAWs**: Logic Pro (AU), Ableton Live, Cubase, Reaper, FL Studio, Soundminer, and other VST3 hosts. (Pro Tools requires AAX and is not currently supported.)
 - **Sample Rates**: 44.1kHz – 192kHz
