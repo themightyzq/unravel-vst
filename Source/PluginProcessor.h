@@ -50,6 +50,20 @@ public:
     
     juce::AudioProcessorValueTreeState& getAPVTS() { return apvts; }
 
+    // Editor-size persistence. The editor reports its current size here from
+    // resized() (message thread). Storing it on the processor — rather than
+    // writing apvts.state on every drag tick — keeps the APVTS ValueTree
+    // untouched during resizing, so hosts like Pro Tools don't flag the
+    // session "modified" mid-drag. getStateInformation() injects the live size
+    // into the copied state at save time, so the current size is always
+    // persisted (even while the editor is open) and survives close/reopen.
+    // Atomics because, while both calls are normally on the message thread,
+    // some hosts call getStateInformation off it. 0 = "not set this session".
+    void setEditorSize (int w, int h) noexcept { editorWidth_.store (w, std::memory_order_relaxed);
+                                                 editorHeight_.store (h, std::memory_order_relaxed); }
+    int  getEditorWidth()  const noexcept { return editorWidth_.load (std::memory_order_relaxed); }
+    int  getEditorHeight() const noexcept { return editorHeight_.load (std::memory_order_relaxed); }
+
     // Request an audio-thread snap of gain smoothers + brightness smoother /
     // IIR to current APVTS values on the next processBlock. Implemented as
     // an atomic flag because SmoothedValue and IIR::Filter::reset() are
@@ -117,6 +131,12 @@ private:
     // new APVTS values (already published via replaceState) are visible to
     // the snap path.
     std::atomic<bool> snapRequested_ { false };
+
+    // Live editor size reported by the editor's resized() (see setEditorSize).
+    // 0 means the editor hasn't reported a size this session, so
+    // getStateInformation() leaves any previously-restored value untouched.
+    std::atomic<int> editorWidth_  { 0 };
+    std::atomic<int> editorHeight_ { 0 };
 
     // Spectrum snapshot (seqlock: single audio-thread writer, single UI-thread reader).
     // Even sequence = stable, odd = write in progress. Writer is wait-free (two atomic

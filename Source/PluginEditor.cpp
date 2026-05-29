@@ -53,10 +53,16 @@ UnravelAudioProcessorEditor::UnravelAudioProcessorEditor(UnravelAudioProcessor& 
     // Window configuration
     setResizable(true, true);
     setResizeLimits(480, 600, 750, 900);
-    // Restore the last editor size from persisted state (saved in resized()).
+    // Restore the last editor size. Prefer the processor's live size (set if
+    // the editor was opened earlier this session), so close/reopen restores
+    // the current size; otherwise fall back to the persisted state, then the
+    // default. The processor is the source of truth during a session because
+    // resized() reports there rather than to the (host-watched) ValueTree.
     auto& state = audioProcessor.getAPVTS().state;
-    const int storedW = static_cast<int>(state.getProperty("editorWidth",  defaultWidth));
-    const int storedH = static_cast<int>(state.getProperty("editorHeight", defaultHeight));
+    const int liveW = audioProcessor.getEditorWidth();
+    const int liveH = audioProcessor.getEditorHeight();
+    const int storedW = liveW > 0 ? liveW : static_cast<int>(state.getProperty("editorWidth",  defaultWidth));
+    const int storedH = liveH > 0 ? liveH : static_cast<int>(state.getProperty("editorHeight", defaultHeight));
     setSize(juce::jlimit(480, 750, storedW), juce::jlimit(600, 900, storedH));
 
     startTimerHz(30);
@@ -65,6 +71,10 @@ UnravelAudioProcessorEditor::UnravelAudioProcessorEditor(UnravelAudioProcessor& 
 UnravelAudioProcessorEditor::~UnravelAudioProcessorEditor()
 {
     stopTimer();
+    // No size persistence here: resized() reports the live size to the
+    // processor on every layout, and getStateInformation() stamps it into the
+    // saved state. Writing the ValueTree from the destructor would dirty the
+    // host session on window close for no benefit.
     // Detach the LookAndFeel before any child component is destroyed.
     setLookAndFeel(nullptr);
 }
@@ -443,10 +453,10 @@ void UnravelAudioProcessorEditor::resized()
     bounds.removeFromRight(padToFaderGap);
     xyPad->setBounds(bounds);
 
-    // Persist the current editor size so it survives close/reopen and host save/load.
-    auto& state = audioProcessor.getAPVTS().state;
-    state.setProperty("editorWidth",  getWidth(),  nullptr);
-    state.setProperty("editorHeight", getHeight(), nullptr);
+    // Report the current size to the processor (a plain atomic member, NOT the
+    // APVTS ValueTree) so drag-resizing doesn't dirty the host session.
+    // getStateInformation() stamps this into the saved state at save time.
+    audioProcessor.setEditorSize(getWidth(), getHeight());
 }
 
 void UnravelAudioProcessorEditor::timerCallback()

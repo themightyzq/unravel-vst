@@ -587,6 +587,21 @@ juce::AudioProcessorEditor* UnravelAudioProcessor::createEditor()
 void UnravelAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
+
+    // Stamp the editor's current size into the copy at save time. The editor
+    // reports its size to the processor (not the live ValueTree) during
+    // resizing, so this is the only place the size reaches persisted state —
+    // and it's always current here, even while the editor is open. If the
+    // editor hasn't reported a size this session (== 0), leave whatever value
+    // a prior load put in the state.
+    const int w = editorWidth_.load (std::memory_order_relaxed);
+    const int h = editorHeight_.load (std::memory_order_relaxed);
+    if (w > 0 && h > 0)
+    {
+        state.setProperty ("editorWidth",  w, nullptr);
+        state.setProperty ("editorHeight", h, nullptr);
+    }
+
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     copyXmlToBinary (*xml, destData);
 }

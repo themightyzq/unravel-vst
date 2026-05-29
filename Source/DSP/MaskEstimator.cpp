@@ -178,11 +178,16 @@ void MaskEstimator::computeMasks(juce::Span<float> tonalMask,
             noisePower *= boost;
         }
 
-        // Wiener gain: ratio of signal power to total power
+        // Wiener gain: ratio of signal power to total power. The eps fallback
+        // is defensive only — tonalPower/noisePower are each floored to
+        // minPower above, so totalPower > eps always holds in practice. We
+        // still default to 0 rather than a "neutral 0.5": a phantom 0.5 tonal
+        // share would otherwise leak through the floor binarisation at the XY
+        // pad corners if that flooring were ever relaxed.
         const float totalPower = tonalPower + noisePower;
         const float wienerGain = (totalPower > eps)
             ? std::clamp(tonalPower / totalPower, 0.0f, 1.0f)
-            : 0.5f;  // Neutral fallback for safety
+            : 0.0f;
 
         // Apply mask exponent for sharpness control
         // pow(x, exp) where exp > 1 makes the mask more binary/dramatic
@@ -191,9 +196,22 @@ void MaskEstimator::computeMasks(juce::Span<float> tonalMask,
         combinedMask[i] = std::isfinite(safeMask) ? safeMask : 0.5f;  // Fallback to neutral
     }
 
-    // Apply temporal smoothing with asymmetric attack/release
-    // Fast attack preserves transients, slow release reduces pumping
+    // Apply temporal smoothing with asymmetric attack/release.
+    // Fast attack preserves transients, slow release reduces pumping.
     applyAsymmetricSmoothing();
+
+    // Snapshot the smoother's OUTPUT (smoothedMask) as the recurrence state for
+    // the NEXT frame — captured here, BEFORE floor/blur run. This keeps
+    // applyAsymmetricSmoothing() a proper one-pole IIR on the Wiener signal:
+    //   y[n] = a*x[n] + (1-a)*y[n-1]
+    // Snapshotting the raw input (combinedMask) instead would collapse it to a
+    // 2-tap FIR blend of the two most recent frames, destroying the slow-release
+    // temporal memory that suppresses pumping. Snapshotting the POST-floor/blur
+    // value (the prior behaviour) instead fed those stages back into the
+    // recurrence — a self-stabilising loop that produced the ~0.077 fixed point
+    // the dsp-debugger pass found. Capturing the pre-floor/blur output avoids
+    // both failure modes.
+    juce::FloatVectorOperations::copy(previousSmoothedMask.data(), smoothedMask.data(), numBins);
 
     // Apply spectral floor BEFORE frequency blur. At high threshold the floor
     // pushes a narrow peak's mask up toward 1.0; doing this before the blur
@@ -237,8 +255,9 @@ void MaskEstimator::computeMasks(juce::Span<float> tonalMask,
         noiseMask[i]     = nonTonal * (1.0f - tr);
     }
 
-    // Store smoothed mask for next frame
-    juce::FloatVectorOperations::copy(previousSmoothedMask.data(), smoothedMask.data(), numBins);
+    // (previousSmoothedMask was snapshotted earlier from smoothedMask — the
+    // smoother's own output, pre floor/blur — so next frame's IIR recurses on
+    // a clean Wiener-derived signal, not on the floored/blurred result.)
 }
 
 void MaskEstimator::computeHorizontalMedian() noexcept
