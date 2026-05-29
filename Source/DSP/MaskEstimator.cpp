@@ -121,27 +121,17 @@ void MaskEstimator::computeMasks(juce::Span<float> tonalMask,
     jassert(transientMask.size() == static_cast<size_t>(numBins));
     jassert(noiseMask.size() == static_cast<size_t>(numBins));
 
-    // ==========================================================================
-    // WIENER-STYLE SOFT MASKING FOR DRAMATIC SEPARATION
-    // ==========================================================================
+    // Wiener-style soft mask: tonalMask = pow(tonalPower/(tonalPower+noisePower), exp).
+    // Exponent < 1 softens separation; > 3 approaches binary masking.
     //
-    // Instead of linear blending, use power-based Wiener filtering with
-    // adjustable exponent for sharp/dramatic separation at extremes.
-    //
-    // Mask exponent controls sharpness:
-    //   < 1.0 = soft separation (more bleed between components)
-    //   = 1.0 = standard Wiener filter
-    //   > 1.0 = sharp separation (more dramatic, less bleed)
-    //   = 3.0+ = near-binary masking (extreme isolation)
-
-    // Calculate mask exponent from separation amount
-    // Use quadratic curve for more dramatic effect at higher settings
-    // separationAmount 0.0 -> exponent 0.3 (very soft, natural blending)
-    // separationAmount 0.5 -> exponent 1.3 (slightly above standard Wiener)
-    // separationAmount 0.75 -> exponent 2.5 (strong separation)
-    // separationAmount 1.0 -> exponent 5.0 (near-binary, extreme isolation)
+    // Mask exponent from separation amount, curve y = 0.3 + 2t + 2.7t².
+    //   t = 0.0  → exp = 0.30 (very soft / natural blending)
+    //   t = 0.5  → exp = 1.98 (above standard Wiener)
+    //   t = 0.75 → exp = 3.32 (strong separation)
+    //   t = 0.85 → exp = 3.95 (near-binary; current default)
+    //   t = 1.0  → exp = 5.00 (extreme isolation)
     const float t = separationAmount;
-    const float maskExponent = 0.3f + t * (2.0f + t * 2.7f);  // Quadratic: 0.3 + 2t + 2.7t²
+    const float maskExponent = 0.3f + t * (2.0f + t * 2.7f);
 
     // Compute Wiener-style masks with spectral feature enhancement
     for (int i = 0; i < numBins; ++i)
@@ -364,15 +354,6 @@ void MaskEstimator::computeSpectralFlatness() noexcept
         {
             spectralFlatness[bin] = 0.5f; // Neutral value
         }
-    }
-}
-
-void MaskEstimator::applyTemporalSmoothing() noexcept
-{
-    // EMA smoothing: smoothed[n] = α * input[n] + (1-α) * smoothed[n-1]
-    for (int i = 0; i < numBins; ++i)
-    {
-        smoothedMask[i] = emaAlpha * combinedMask[i] + (1.0f - emaAlpha) * previousSmoothedMask[i];
     }
 }
 

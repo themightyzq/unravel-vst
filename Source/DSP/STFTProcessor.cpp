@@ -183,68 +183,18 @@ void STFTProcessor::calculateWindowScaling() noexcept
     //
     // Perfect reconstruction requires compensating for two factors:
     //
-    // 1. FFT Scaling: JUCE's vDSP-based FFT implementation has different scaling
-    //    on forward vs inverse transforms. The round-trip gain is approximately
-    //    fftSize/2, so we need to multiply by 2/fftSize.
-    //
-    // 2. COLA (Constant Overlap-Add) for windowing:
-    //    - Using Hann window for both analysis and synthesis means we multiply
-    //      each sample by Hann²(n) after round-trip
-    //    - The sum of Hann²(n) at each output position across overlapping frames
-    //      determines the COLA constant
-    //    - For 75% overlap (4 frames): sum = 1.5, correction = 2/3
-    //    - For 50% overlap (2 frames): sum = 1.0, correction = 1.0
-    //
-    // Combined formula: synthesisScale = (2/fftSize) * (1/COLA_sum)
-    // For 75% overlap: synthesisScale = (2/fftSize) * (2/3) = 4/(3*fftSize)
-    //
-    // HOWEVER: Empirical testing shows the actual scaling needed is larger.
-    // This is due to how JUCE's performRealOnlyInverseTransform handles the
-    // reconstruction. The correct empirical factor is fftSize/4 for the FFT
-    // compensation, giving us:
-    //
-    // synthesisScale = (fftSize/4) * (COLA_factor) = (fftSize/4) * (2/3)
-    //                = fftSize/6 for 75% overlap
-
+    // Round-trip scaling: JUCE's performRealOnlyInverseTransform applies 1/N
+    // internally, so the FFT round-trip is unity. The Hann²(n) overlap-add at
+    // 75% overlap sums to 1.5; we divide by that with synthesisScale = 2/3.
+    // For 50% overlap the sum is 1.0; for other overlaps fall back to 2/overlap.
     const float overlapFactor = static_cast<float>(config_.fftSize) / config_.hopSize;
-
-    // No analysis scaling needed
     analysisScale_ = 1.0f;
-
-    // COLA correction factor
-    float colaFactor;
-    if (std::abs(overlapFactor - 4.0f) < 0.001f) // 75% overlap
-    {
-        // Sum of Hann² over 4 overlapping frames = 1.5, correction = 2/3
-        colaFactor = 2.0f / 3.0f;
-    }
-    else if (std::abs(overlapFactor - 2.0f) < 0.001f) // 50% overlap
-    {
-        // Sum of Hann² over 2 overlapping frames = 1.0, no correction needed
-        colaFactor = 1.0f;
-    }
+    if (std::abs(overlapFactor - 4.0f) < 0.001f)        // 75% overlap
+        synthesisScale_ = 2.0f / 3.0f;
+    else if (std::abs(overlapFactor - 2.0f) < 0.001f)   // 50% overlap
+        synthesisScale_ = 1.0f;
     else
-    {
-        // General case: approximate COLA correction
-        colaFactor = 2.0f / overlapFactor;
-    }
-
-    // FFT compensation factor
-    //
-    // JUCE's vDSP-based FFT implementation:
-    // - Forward FFT: produces unnormalized output
-    // - Inverse FFT: applies 1/fftSize scaling internally
-    //
-    // With proper JUCE FFT normalization, the round-trip should have
-    // approximately unity gain BEFORE windowing. The overlap-add of
-    // Hann² windows (analysis * synthesis) produces 1.5x accumulation
-    // for 75% overlap, which is corrected by colaFactor = 2/3.
-    //
-    // Therefore, fftCompensation should be 1.0 (no additional compensation needed).
-    const float fftCompensation = 1.0f;
-
-    // Combined synthesis scale: just the COLA correction
-    synthesisScale_ = fftCompensation * colaFactor;
+        synthesisScale_ = 2.0f / overlapFactor;
 }
 
 void STFTProcessor::processForwardTransform() noexcept

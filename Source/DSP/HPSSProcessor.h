@@ -214,22 +214,8 @@ public:
      */
     float getSpectralFloor() const noexcept { return spectralFloor_; }
 
-    /**
-     * Enable debug passthrough mode.
-     * When enabled, skips mask estimation and passes STFT through with unity gain.
-     * Use this to isolate whether distortion is in STFT or mask estimation.
-     * @param enabled True to enable debug passthrough
-     */
-    void setDebugPassthrough(bool enabled) noexcept { debugPassthroughEnabled_ = enabled; }
-
-    /**
-     * Check if debug passthrough is enabled.
-     * @return True if debug passthrough is enabled
-     */
-    bool isDebugPassthroughEnabled() const noexcept { return debugPassthroughEnabled_; }
-
     // === Debug and Analysis Interface ===
-    
+
     /**
      * Get read-only access to current magnitude frame for visualization.
      * Only valid after processing a frame.
@@ -275,10 +261,6 @@ private:
     float focus_ = 0.0f;                                ///< Focus bias (-1 to +1)
     float spectralFloor_ = 0.0f;                        ///< Spectral floor threshold (0-1)
 
-    // === Debug Mode ===
-    // Set to true to bypass mask estimation for debugging STFT pipeline
-    bool debugPassthroughEnabled_ = false;              ///< Skip mask estimation (disabled by default)
-    
     // === Processing State ===
     double currentSampleRate_ = 48000.0;                ///< Current sample rate
     int currentBlockSize_ = 512;                        ///< Current block size

@@ -50,21 +50,10 @@ public:
     
     juce::AudioProcessorValueTreeState& getAPVTS() { return apvts; }
 
-    // Request the audio thread to snap all parameter smoothers and reset the
-    // brightness IIR history to match current APVTS values on the next
-    // processBlock, rather than ramping over 20 ms. Call after a host state
-    // load or a UI preset switch so playback resuming after the change
-    // doesn't swoosh up to the new brightness/gain values or bleed pre-load
-    // IIR history into the new tone.
-    //
-    // Implemented as an atomic request flag picked up by the audio thread,
-    // because juce::SmoothedValue and juce::dsp::IIR::Filter::reset() are
-    // NOT safe to mutate from the message thread while processBlock runs
-    // concurrently (filter reset can reach a conditional allocation if the
-    // filter's order changed, and the smoothers' fields are plain
-    // non-atomic). The snap is applied within ~one block (≪ 20 ms, less
-    // than the smoother ramp it suppresses). See REVIEW-AUDIO.md C7 and the
-    // 2026-05-29 code-reviewer pass.
+    // Request an audio-thread snap of gain smoothers + brightness smoother /
+    // IIR to current APVTS values on the next processBlock. Implemented as
+    // an atomic flag because SmoothedValue and IIR::Filter::reset() are
+    // not safe to mutate from the message thread while processBlock runs.
     void requestParameterStateSnap() noexcept;
 
 private:
@@ -77,13 +66,8 @@ private:
     // Per-channel HPSS processor
     std::vector<std::unique_ptr<HPSSProcessor>> channelProcessors;
 
-    // The real per-stream gain smoothers live INSIDE HPSSProcessor
-    // (tonalGainSmoother_ / noiseGainSmoother_ / transientGainSmoother_),
-    // advanced per-frame inside its processBlock(). Earlier revisions also
-    // carried three SmoothedValue members here with the same names; those
-    // were dead state — written via setTargetValue() but never read — and
-    // misled the original C7 snap fix into snapping the wrong smoothers.
-    // Removed in v1.3.1.
+    // Per-stream gain smoothers live inside each HPSSProcessor and are
+    // advanced per-frame inside its processBlock().
 
     // Current parameter values (updated once per block)
     float currentTonalGain = 1.0f;
