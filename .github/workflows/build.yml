@@ -104,9 +104,11 @@ jobs:
         run: |
           # Use ditto rather than cp -r so xattrs (including the just-applied
           # ad-hoc signature) survive the zip step that upload-artifact does.
+          # Standalone path is build/bin/ per CMakeLists' RUNTIME_OUTPUT_DIRECTORY.
           mkdir -p release
           ditto build/Unravel_artefacts/Release/VST3/Unravel.vst3 release/Unravel.vst3
           ditto build/Unravel_artefacts/Release/AU/Unravel.component release/Unravel.component
+          ditto build/bin/Standalone/Unravel.app release/Unravel.app
 
       - name: Package (Windows)
         if: runner.os == 'Windows'

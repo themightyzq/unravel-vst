@@ -54,9 +54,9 @@ if [ "$OS" = "Darwin" ]; then
         mkdir -p "$VST3_DIR"
         rm -rf "$VST3_DIR/Unravel.vst3"
         cp -R "$BUILD_DIR/Unravel_artefacts/$BUILD_TYPE/VST3/Unravel.vst3" "$VST3_DIR/"
-        echo -e "${GREEN}✓ VST3 installed to $VST3_DIR${NC}"
+        echo -e "${GREEN}OK: VST3 installed to $VST3_DIR${NC}"
     fi
-    
+
     # Install AU
     if [ -d "$BUILD_DIR/Unravel_artefacts/$BUILD_TYPE/AU/Unravel.component" ]; then
         echo "Installing AU..."
@@ -64,25 +64,39 @@ if [ "$OS" = "Darwin" ]; then
         mkdir -p "$AU_DIR"
         rm -rf "$AU_DIR/Unravel.component"
         cp -R "$BUILD_DIR/Unravel_artefacts/$BUILD_TYPE/AU/Unravel.component" "$AU_DIR/"
-        echo -e "${GREEN}✓ AU installed to $AU_DIR${NC}"
+        echo -e "${GREEN}OK: AU installed to $AU_DIR${NC}"
         
         # Kill and restart AU host to reload cache
         echo "Restarting AU host process..."
         killall -9 AudioComponentRegistrar 2>/dev/null || true
     fi
     
-    # Install Standalone app
-    if [ -d "$BUILD_DIR/Unravel_artefacts/$BUILD_TYPE/Standalone/Unravel.app" ]; then
-        echo "Installing Standalone app..."
-        APP_DIR="/Applications"
+    # Install Standalone app.
+    #
+    # The Standalone bundle lives at build/bin/Standalone/Unravel.app per
+    # CMakeLists.txt's RUNTIME_OUTPUT_DIRECTORY override (not at the
+    # JUCE-default build/Unravel_artefacts/<Config>/Standalone/).
+    #
+    # Default install target is ~/Applications so the script doesn't need
+    # sudo. Set INSTALL_SCOPE=system in the environment to install into
+    # /Applications instead (will prompt for admin if not running as root).
+    STANDALONE_SRC="$BUILD_DIR/bin/Standalone/Unravel.app"
+    if [ -d "$STANDALONE_SRC" ]; then
+        if [ "${INSTALL_SCOPE:-user}" = "system" ]; then
+            APP_DIR="/Applications"
+        else
+            APP_DIR="$HOME/Applications"
+            mkdir -p "$APP_DIR"
+        fi
+        echo "Installing Standalone app to $APP_DIR..."
         rm -rf "$APP_DIR/Unravel.app"
-        cp -R "$BUILD_DIR/Unravel_artefacts/$BUILD_TYPE/Standalone/Unravel.app" "$APP_DIR/"
-        echo -e "${GREEN}✓ Standalone app installed to $APP_DIR${NC}"
+        cp -R "$STANDALONE_SRC" "$APP_DIR/"
+        echo -e "${GREEN}OK: Standalone app installed to $APP_DIR${NC}"
     fi
-    
+
 elif [ "$OS" = "Linux" ]; then
     echo -e "${GREEN}Installing on Linux...${NC}"
-    
+
     # Install VST3
     if [ -d "$BUILD_DIR/Unravel_artefacts/$BUILD_TYPE/VST3/Unravel.vst3" ]; then
         echo "Installing VST3..."
@@ -90,7 +104,7 @@ elif [ "$OS" = "Linux" ]; then
         mkdir -p "$VST3_DIR"
         rm -rf "$VST3_DIR/Unravel.vst3"
         cp -R "$BUILD_DIR/Unravel_artefacts/$BUILD_TYPE/VST3/Unravel.vst3" "$VST3_DIR/"
-        echo -e "${GREEN}✓ VST3 installed to $VST3_DIR${NC}"
+        echo -e "${GREEN}OK: VST3 installed to $VST3_DIR${NC}"
     fi
     
 else

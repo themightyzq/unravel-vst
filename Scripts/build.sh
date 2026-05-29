@@ -17,13 +17,16 @@ NC='\033[0m' # No Color
 
 echo -e "${GREEN}=== Unravel Plugin Build Script ===${NC}"
 
-# Check if JUCE is available
+# Check if JUCE is available. The repo pins JUCE 8.0.9 as a submodule
+# (CMakeLists.txt requires the JUCE 8 API surface); when cloned fresh
+# without --recursive, fall back to the same version here so the source
+# tree and build script agree.
 if [ ! -d "$PROJECT_DIR/JUCE" ]; then
-    echo -e "${YELLOW}JUCE not found. Cloning JUCE repository...${NC}"
+    echo -e "${YELLOW}JUCE not found. Cloning JUCE 8.0.9...${NC}"
     cd "$PROJECT_DIR"
     git clone https://github.com/juce-framework/JUCE.git
     cd JUCE
-    git checkout 7.0.9  # Use stable version
+    git checkout 8.0.9
 fi
 
 # Parse arguments
