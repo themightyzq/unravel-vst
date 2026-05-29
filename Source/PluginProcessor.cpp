@@ -390,6 +390,29 @@ void UnravelAudioProcessor::updateParameters() noexcept
         if (! soloTransient) transientGain = 0.0f;
     }
 
+    // Implicit corner isolation for the XY pad — track the transient stream
+    // to the orthogonal axis so dragging to a corner is true "isolate this
+    // stream only" instead of "boost one of the two pad-controlled streams
+    // while the unattributed transient stream keeps playing."
+    //
+    // Why this exists: the pad only writes tonalGain / noisyGain. Material
+    // with high spectral flux (cymbals, sibilants, noisy modulation like
+    // lightsaber whooshes) routes a large share of its energy to the
+    // transient mask. Without this scaling, the pad's "fully tonal" or
+    // "fully noise" corners leave the transient stream at unity, so the
+    // dominant flux-driven content keeps playing and the corner doesn't
+    // sound isolated. Scaling transient by min(tonalGain, noisyGain)
+    // produces:
+    //   - unity-balanced (1, 1):   transient untouched (cap = 1)
+    //   - either corner (1, 0):    transient silenced  (cap = 0)
+    //   - symmetric attenuation:   transient tracks the same level
+    //
+    // Skipped when any stream is soloed — solo is explicit "I want only X"
+    // intent that should override the implicit corner behavior. Otherwise
+    // soloing Transient while the pad is at a corner would silence everything.
+    if (! anySolo)
+        transientGain *= std::min(tonalGain, noisyGain);
+
     if (muteTonal)     tonalGain     = 0.0f;
     if (muteNoise)     noisyGain     = 0.0f;
     if (muteTransient) transientGain = 0.0f;
