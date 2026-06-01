@@ -1,7 +1,23 @@
 # Multi-Resolution HPSS — True Stream Isolation
 
 **Date:** 2026-06-01
-**Status:** SUPERSEDED by Revision 2 (below). The original multi-resolution design was implemented, measured, and **reverted** — see "Revision 2" for the finding and the replacement design now in effect.
+**Status:** SUPERSEDED. Both the multi-resolution design (Revision 1) and the skirt-dilation/center-median direction (Revision 2/3) were implemented, measured, and abandoned. The real problem is narrow (low-frequency hum) and resisted three approaches; a dedicated low-frequency harmonic tracker is the chosen next direction and will get its own spec. See Revision 3.
+
+---
+
+## Revision 3 (2026-06-01) — Skirt dilation & center-excluded median both failed; pivot to a harmonic tracker
+
+After Revision 2, two more approaches were built and measured against the now-clean harness (seamless tones + Goertzel hum measurement):
+
+- **Harness artifact corrected:** the looped test sine had a wrap-around discontinuity (non-integer cycles) injecting a phantom transient — it had inflated the apparent tonal bleed by ~117 dB. With seamless tones, a 440 Hz tone already isolates to **−146 dB** at the noise corner with the existing 2048 code. The real gap is ONLY low-frequency sustained tones (100/160 Hz hum bleeds ~**−24 dB**).
+- **Skirt dilation:** abandoned before implementation — the low-freq peak itself isn't classified tonal, so there's no core to dilate from.
+- **Center-excluded ("donut") vertical median:** implemented and measured. Did NOT work: the real low-freq skirt is ~7 bins wide (the median window can't escape it), so hum only moved −24→−26 dB; and removing the center bin regressed noise rejection (noise@tonal −40→−34 dB) because center-inclusion was protecting it. The two needs are in tension. Reverted, nothing shipped.
+
+**Root cause (final):** at 2048 FFT there are ~8 bins across 0–200 Hz; a low tone, its partials, and the broadband bed overlap in too few bins for median-based HPSS to separate. Bigger FFT makes detection worse (Rev 1). This is a resolution-limited problem that median/Wiener masking cannot solve at low frequencies.
+
+**Chosen direction:** a dedicated **low-frequency harmonic/sinusoidal partial tracker** — detect the fundamental + partials of sustained low tones and subtract them from the noise stream. This is a new sub-project with its own spec/plan (note: CLAUDE.md references a `SinusoidalModelProcessor` that HPSS replaced — review that history first). The full memory of failed approaches is in the project memory `dsp-isolation-findings`.
+
+**The Revision-1/2 sections below are retained for context only.**
 **Scope:** DSP only (`Source/DSP/`). UI redesign is a separate, later sub-project.
 
 ---
