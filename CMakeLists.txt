@@ -92,6 +92,8 @@ target_sources(Unravel
         Source/DSP/MagPhaseFrame.h
         Source/DSP/MaskEstimator.cpp
         Source/DSP/MaskEstimator.h
+        Source/DSP/LowFreqPartialTracker.cpp
+        Source/DSP/LowFreqPartialTracker.h
         Source/DSP/HarmonicMaskDetector.cpp
         Source/DSP/HarmonicMaskDetector.h
         Source/DSP/MaskReconciler.cpp

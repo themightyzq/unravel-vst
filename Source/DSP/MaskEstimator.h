@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "LowFreqPartialTracker.h"
 #include <vector>
 
 /**
@@ -220,7 +221,12 @@ private:
 
     // Per-bin transient envelope follower state (drives the Transient stream).
     std::vector<float> transientEnv;
-    
+
+    // Recovers sustained low-frequency tones the median classifier misses at
+    // low bins, and pulls them out of the Noise stream. Fed each frame in
+    // updateGuides(); its override is applied in finalizeMasksFromSmoothed().
+    LowFreqPartialTracker lowFreqTracker;
+
     // Core HPSS algorithm methods
     
     /**
