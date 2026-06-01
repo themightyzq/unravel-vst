@@ -39,6 +39,7 @@ public:
     {
         int fftSize = 2048;     // FFT size (must be power of 2)
         int hopSize = 512;      // Hop size (recommended: fftSize/4)
+        bool analysisOnly = false;  // Skip IFFT/synthesis buffers — forward analysis only.
         
         // Alternative low-latency configuration
         static Config lowLatency() noexcept 
@@ -104,6 +105,15 @@ public:
      * @return Span of complex frequency domain data (size: numBins)
      */
     juce::Span<std::complex<float>> getCurrentFrame() noexcept;
+
+    /**
+     * Get the magnitude spectrum of the current frame (size: numBins).
+     * Only valid after a frame has been processed (isFrameReady() == true);
+     * invalidated by the next pushAndProcess() call that produces a new frame.
+     * Populated only in analysisOnly mode.
+     * @return Span of current magnitudes (size numBins)
+     */
+    juce::Span<const float> getCurrentMagnitudes() const noexcept;
 
     /**
      * Set the current frequency domain frame after processing.
@@ -276,6 +286,7 @@ private:
     alignas(32) std::vector<float> fftOutputBuffer_;     // Time domain output (IFFT result)
     alignas(32) std::vector<float> complexBuffer_;       // Complex FFT data (interleaved real/imag)
     alignas(32) std::vector<std::complex<float>> currentFrame_; // Current frequency domain frame
+    alignas(32) std::vector<float> magnitudeBuffer_;   // |currentFrame_| for analysis-only consumers
     
     // Processing state
     int samplesInInputBuffer_ = 0;

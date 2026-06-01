@@ -14,6 +14,7 @@
 #include <JuceHeader.h>
 #include "HPSSProcessor.h"
 #include "MaskEstimator.h"
+#include "STFTProcessor.h"
 
 #include <array>
 #include <cmath>
@@ -333,6 +334,30 @@ bool checkIsolationTargets (float separationPct)
     }
     return ok;
 }
+bool checkAnalysisOnlyMagnitude()
+{
+    STFTProcessor::Config cfg; cfg.fftSize = 2048; cfg.hopSize = 512; cfg.analysisOnly = true;
+    STFTProcessor stft (cfg);
+    stft.prepare (kSR, kBlock);
+    std::vector<float> sine (cfg.fftSize * 4);
+    genSine (sine, 1000.0, 1.0f);  // 1 kHz -> bin ~ 1000 / (48000/2048) = 42.7
+    int produced = 0; const int peakBin = (int) std::round (1000.0 / (kSR / cfg.fftSize));
+    bool peakIsMax = false;
+    for (size_t off = 0; off + (size_t) kBlock <= sine.size(); off += (size_t) kBlock)
+    {
+        stft.pushAndProcess (sine.data() + off, kBlock);
+        if (stft.isFrameReady())
+        {
+            auto mag = stft.getCurrentMagnitudes();
+            int argmax = 0; for (int b = 1; b < (int) mag.size(); ++b) if (mag[b] > mag[argmax]) argmax = b;
+            peakIsMax = std::abs (argmax - peakBin) <= 1;
+            ++produced;
+        }
+    }
+    const bool ok = produced > 0 && peakIsMax;
+    std::printf ("  [%s] analysisOnly magnitude peak at expected bin\n", ok ? "PASS" : "FAIL");
+    return ok;
+}
 } // namespace
 
 int main()
@@ -364,6 +389,7 @@ int main()
     runMaskAttribution (85.0f, 0.0f);
 
     bool targetsOk = true;
+    targetsOk &= checkAnalysisOnlyMagnitude();
     targetsOk &= checkIsolationTargets (85.0f);
     targetsOk &= checkIsolationTargets (100.0f);
 

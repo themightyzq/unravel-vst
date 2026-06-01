@@ -19,9 +19,12 @@ STFTProcessor::STFTProcessor(const Config& config)
     // and set normalize to false
     analysisWindow_ = std::make_unique<juce::dsp::WindowingFunction<float>>(
         config_.fftSize + 1, juce::dsp::WindowingFunction<float>::hann, false);
-    synthesisWindow_ = std::make_unique<juce::dsp::WindowingFunction<float>>(
-        config_.fftSize + 1, juce::dsp::WindowingFunction<float>::hann, false);
-    
+
+    // Synthesis window is only needed for the inverse/overlap-add path.
+    if (! config_.analysisOnly)
+        synthesisWindow_ = std::make_unique<juce::dsp::WindowingFunction<float>>(
+            config_.fftSize + 1, juce::dsp::WindowingFunction<float>::hann, false);
+
     // Calculate optimal window scaling for COLA reconstruction
     calculateWindowScaling();
 }
@@ -35,17 +38,24 @@ void STFTProcessor::prepare(double sampleRate, int maxBlockSize) noexcept
     
     // Calculate buffer sizes with safety margins
     const int inputBufferSize = config_.fftSize * 4; // Large enough for circular buffering
-    const int outputBufferSize = config_.fftSize * 4; // Extra space for overlap-add
-    
-    // Resize ring buffers
+
+    // Resize input ring buffer (analysis path — always needed)
     inputBuffer_.resize(inputBufferSize);
-    outputBuffer_.resize(outputBufferSize);
-    
-    // Allocate processing buffers (aligned for SIMD operations)
+
+    // Allocate analysis processing buffers (aligned for SIMD operations)
     fftInputBuffer_.resize(config_.fftSize, 0.0f);
-    fftOutputBuffer_.resize(config_.fftSize, 0.0f);
     complexBuffer_.resize(config_.fftSize * 2, 0.0f); // Interleaved real/imag
     currentFrame_.resize(config_.getNumBins());
+    magnitudeBuffer_.assign(config_.getNumBins(), 0.0f);
+
+    // Synthesis-only buffers: output ring buffer + IFFT time-domain output.
+    // Skipped entirely in analysis-only mode (no IFFT / overlap-add).
+    if (! config_.analysisOnly)
+    {
+        const int outputBufferSize = config_.fftSize * 4; // Extra space for overlap-add
+        outputBuffer_.resize(outputBufferSize);
+        fftOutputBuffer_.resize(config_.fftSize, 0.0f);
+    }
     
     // Initialize state
     samplesInInputBuffer_ = 0;
@@ -56,8 +66,9 @@ void STFTProcessor::prepare(double sampleRate, int maxBlockSize) noexcept
     
     // Clear all buffers to ensure clean start
     inputBuffer_.clear();
-    outputBuffer_.clear();
-    
+    if (! config_.analysisOnly)
+        outputBuffer_.clear();
+
     juce::ignoreUnused(maxBlockSize); // Used for documentation only
 }
 
@@ -68,12 +79,17 @@ void STFTProcessor::reset() noexcept
     
     // Clear all buffers
     inputBuffer_.clear();
-    outputBuffer_.clear();
-    
+
     std::fill(fftInputBuffer_.begin(), fftInputBuffer_.end(), 0.0f);
-    std::fill(fftOutputBuffer_.begin(), fftOutputBuffer_.end(), 0.0f);
     std::fill(complexBuffer_.begin(), complexBuffer_.end(), 0.0f);
     std::fill(currentFrame_.begin(), currentFrame_.end(), std::complex<float>(0.0f, 0.0f));
+    std::fill(magnitudeBuffer_.begin(), magnitudeBuffer_.end(), 0.0f);
+
+    if (! config_.analysisOnly)
+    {
+        outputBuffer_.clear();
+        std::fill(fftOutputBuffer_.begin(), fftOutputBuffer_.end(), 0.0f);
+    }
     
     // Reset state
     samplesInInputBuffer_ = 0;
@@ -136,6 +152,7 @@ juce::Span<std::complex<float>> STFTProcessor::getCurrentFrame() noexcept
 
 void STFTProcessor::setCurrentFrame(juce::Span<const std::complex<float>> frame) noexcept
 {
+    if (config_.analysisOnly) return;
     jassert(isInitialized_);
     jassert(frame.size() == static_cast<size_t>(config_.getNumBins()));
     
@@ -151,6 +168,7 @@ void STFTProcessor::setCurrentFrame(juce::Span<const std::complex<float>> frame)
 
 void STFTProcessor::processOutput(float* outputSamples, int numSamples) noexcept
 {
+    if (config_.analysisOnly) return;
     jassert(isInitialized_);
     jassert(outputSamples != nullptr);
     jassert(numSamples >= 0);
@@ -233,10 +251,23 @@ void STFTProcessor::processForwardTransform() noexcept
         const float imag = complexBuffer_[i * 2 + 1];
         currentFrame_[i] = std::complex<float>(real, imag);
     }
+
+    // Populate magnitude buffer for analysis-only consumers (no allocation;
+    // magnitudeBuffer_ is pre-sized in prepare()).
+    // Guarded: only needed in analysisOnly mode; production reads via MagPhaseFrame.
+    if (config_.analysisOnly)
+        for (int b = 0; b < getNumBins(); ++b)
+            magnitudeBuffer_[(size_t) b] = std::abs (currentFrame_[(size_t) b]);
+}
+
+juce::Span<const float> STFTProcessor::getCurrentMagnitudes() const noexcept
+{
+    return { magnitudeBuffer_.data(), (size_t) getNumBins() };
 }
 
 void STFTProcessor::processInverseTransform() noexcept
 {
+    if (config_.analysisOnly) return;
     // Convert std::complex format back to standard interleaved format for JUCE FFT
     const int numBins = config_.getNumBins();  // fftSize/2 + 1
 
