@@ -60,7 +60,9 @@ void LowFreqPartialTracker::detectPeaks(juce::Span<const float> magnitudes) noex
     // Median of the low band is the broadband floor. A real tone towers over it;
     // a broadband-noise "peak" sits only a few× above it. Requiring a peak to
     // exceed kFloorFactor × this median is the tonality gate that keeps the
-    // tracker from locking onto flat noise.
+    // tracker from locking onto flat noise. Assumes a tracked partial occupies
+    // only a small fraction of the low band (true below kMaxTrackHz), so its
+    // skirt doesn't lift the median enough to dilute the gate.
     for (int b = 0; b < scanBins_; ++b)
         floorScratch_[static_cast<size_t>(b)] = magnitudes[static_cast<size_t>(b)];
     const auto mid = floorScratch_.begin() + scanBins_ / 2;
@@ -208,7 +210,10 @@ void LowFreqPartialTracker::rebuildOverride() noexcept
 
     // The energy below the lowest confirmed partial is that partial's lower
     // leakage skirt (a 2048 STFT spreads a low tone across several bins). Claim
-    // it down to DC so the hum's lower tail leaves the noise stream too.
+    // it down to DC at full gain (no taper) so the hum's lower tail leaves the
+    // noise stream too — this sub-fundamental region is dominated by the
+    // partial's tail, not independent content, and the span stays small because
+    // tracked partials are bounded by kMaxTrackHz.
     if (lowestCenter > 0)
     {
         const int top = std::min(lowestCenter, numBins_);

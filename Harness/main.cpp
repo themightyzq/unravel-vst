@@ -635,13 +635,12 @@ bool checkHarmonicDetector()
 bool checkLowFreqTracker()
 {
     const int fftSize = 2048, numBins = fftSize / 2 + 1;
-    const double binHz = kSR / fftSize;
-    const int toneBin = (int) std::round (100.0 / binHz);   // ~bin 4
 
-    auto runFrames = [&] (bool jitter)
+    auto runFrames = [&] (double sr, bool jitter)
     {
+        const int toneBin = (int) std::round (100.0 / (sr / fftSize));  // 100 Hz partial
         LowFreqPartialTracker tr;
-        tr.prepare (numBins, kSR);
+        tr.prepare (numBins, sr);
         std::vector<float> mag (numBins, 0.02f);  // low broadband floor
         std::vector<float> mask (numBins, 0.0f);
         juce::Random rng (7);
@@ -658,15 +657,28 @@ bool checkLowFreqTracker()
         std::fill (mask.begin(), mask.end(), 0.0f);
         tr.applyOverride (juce::Span<float> (mask.data(), (size_t) numBins));
         float peak = 0.0f;
-        for (int b = 0; b < numBins; ++b) peak = std::max (peak, mask[(size_t) b]);
-        return peak;
+        bool finite = true;
+        for (int b = 0; b < numBins; ++b)
+        {
+            finite = finite && std::isfinite (mask[(size_t) b]);
+            peak = std::max (peak, mask[(size_t) b]);
+        }
+        return std::pair<float,bool> { finite ? peak : -1.0f, finite };
     };
 
-    const float steadyOverride = runFrames (false);
-    const float jitterOverride = runFrames (true);
-    const bool ok = steadyOverride > 0.8f && jitterOverride < 0.1f;
-    std::printf ("  [%s] low-freq tracker: steady=%.3f (want>0.8)  jitter=%.3f (want<0.1)\n",
-                 ok ? "PASS" : "FAIL", steadyOverride, jitterOverride);
+    // Steady tone must be confirmed/overridden and finite across sample rates (D.2).
+    bool ok = true;
+    float steadyMin = 1.0f;
+    for (double sr : { 44100.0, 48000.0, 96000.0 })
+    {
+        const auto r = runFrames (sr, false);
+        ok = ok && r.second && r.first > 0.8f;
+        steadyMin = std::min (steadyMin, r.first);
+    }
+    const float jitterOverride = runFrames (48000.0, true).first;
+    ok = ok && jitterOverride < 0.1f;
+    std::printf ("  [%s] low-freq tracker: steady(min over 44.1/48/96k)=%.3f (want>0.8)  jitter=%.3f (want<0.1)\n",
+                 ok ? "PASS" : "FAIL", steadyMin, jitterOverride);
     return ok;
 }
 } // namespace
