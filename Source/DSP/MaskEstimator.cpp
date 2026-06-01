@@ -42,6 +42,8 @@ void MaskEstimator::prepare(int numBins, double sampleRate) noexcept
     historyWriteIndex = 0;
     framesReceived = 0;  // Start with no valid frames
 
+    lowFreqTracker.prepare(numBins, sampleRate);
+
     isInitialized = true;
 }
 
@@ -75,6 +77,8 @@ void MaskEstimator::reset() noexcept
                                        horizontalMedianSize * numBins);
     historyWriteIndex = 0;
     framesReceived = 0;  // Reset valid frame count
+
+    lowFreqTracker.reset();
 }
 
 void MaskEstimator::updateGuides(juce::Span<const float> magnitudes) noexcept
@@ -97,6 +101,10 @@ void MaskEstimator::updateGuides(juce::Span<const float> magnitudes) noexcept
     // Compute horizontal and vertical median filters
     computeHorizontalMedian();
     computeVerticalMedian();
+
+    // Track sustained low-frequency partials from this magnitude frame; its
+    // per-bin override is applied later in finalizeMasksFromSmoothed().
+    lowFreqTracker.process(magnitudes);
 }
 
 void MaskEstimator::updateStats(juce::Span<const float> magnitudes) noexcept
@@ -274,6 +282,15 @@ void MaskEstimator::finalizeMasksFromSmoothed(juce::Span<float> tonalMask,
     // preserved exactly, or a narrow peak's blurred value drops back below
     // the binarisation threshold and the floor's work is undone.
     applyFrequencyBlur();
+
+    // Pull confirmed sustained low-frequency partials up toward tonal, AFTER the
+    // floor/blur so it overrides even the corner binarisation. This recovers
+    // low hums (e.g. a sub-200 Hz drone) the vertical-median classifier misses
+    // at low bins, removing them from the Noise stream. Only ever raises the
+    // tonal mask, only at confirmed low partials — mid/high and broadband noise
+    // are untouched, so a unity-gain full mix still reconstructs identically.
+    lowFreqTracker.applyOverride(juce::Span<float>(smoothedMask.data(),
+                                                   static_cast<size_t>(numBins)));
 
     // Three-stream split (mass-conserving: tonal + transient + noise = 1 per bin).
     //

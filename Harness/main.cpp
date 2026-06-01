@@ -17,6 +17,7 @@
 #include "HarmonicMaskDetector.h"
 #include "MaskReconciler.h"
 #include "STFTProcessor.h"
+#include "LowFreqPartialTracker.h"
 
 #include <array>
 #include <cmath>
@@ -107,6 +108,21 @@ void genClickTrain (std::vector<float>& x, double hz, float amp)
         // Short 2-sample bipolar click (broadband)
         x[n] = amp;
         if (n + 1 < x.size()) x[n + 1] = -amp;
+    }
+}
+
+// Just the lightsaber hum (the two sustained low partials, no crackle bed) —
+// seamless. Used to measure hum rejection without the crackle, which the noise
+// corner legitimately keeps and which would otherwise dominate whole-signal energy.
+void genHum (std::vector<float>& x)
+{
+    const double hum100 = seamlessFreq (100.0, (int) x.size());
+    const double hum160 = seamlessFreq (160.0, (int) x.size());
+    for (size_t n = 0; n < x.size(); ++n)
+    {
+        const double t = (double) n / kSR;
+        x[n] = 0.35f * std::sin (2.0 * M_PI * hum100 * t)
+             + 0.20f * std::sin (2.0 * M_PI * hum160 * t);
     }
 }
 
@@ -480,12 +496,15 @@ bool checkIsolationTargets (float separationPct)
     const float sep01 = separationPct / 100.0f;
     bool ok = true;
 
-    std::vector<float> sine (kBlock * 8), noise (kBlock * 8),
-                       clicks (kBlock * 8), saber (kBlock * 16);
+    // Noise spans the whole measurement window (no loop) so it is genuinely
+    // broadband — a short looped noise buffer is periodic, with a stable
+    // low-harmonic comb that the partial tracker would (correctly) treat as tonal.
+    std::vector<float> sine (kBlock * 8), noise (kBlock * kNumBlocks),
+                       clicks (kBlock * 8), hum (kBlock * 16);
     genSine (sine, seamlessFreq (440.0, (int) sine.size()), 0.5f);
     genNoise (noise, 0.5f, 1234);
     genClickTrain (clicks, 8.0, 0.9f);
-    genLightsaber (saber, 777);
+    genHum (hum);
 
     auto rejectionDb = [&] (const std::vector<float>& sig, float tonalDb, float noiseDb)
     {
@@ -496,12 +515,14 @@ bool checkIsolationTargets (float separationPct)
         return toDb (eCorner / std::max (eFull, 1e-30));
     };
 
+    // hum @ noise corner uses the crackle-free hum so the measurement reflects
+    // tonal rejection, not the crackle the noise corner is supposed to keep.
     struct Check { const char* label; double db; double targetMaxDb; };
     const std::array<Check,4> checks = {{
-        { "sine  @ noise corner (tonal rejection)",  rejectionDb (sine,  -60.0f, 0.0f), -50.0 },
-        { "saber @ noise corner (hum rejection)",    rejectionDb (saber, -60.0f, 0.0f), -50.0 },
+        { "sine @ noise corner (tonal rejection)",   rejectionDb (sine,  -60.0f, 0.0f), -50.0 },
+        { "hum  @ noise corner (hum rejection)",     rejectionDb (hum,   -60.0f, 0.0f), -50.0 },
         { "noise @ tonal corner (noise rejection)",  rejectionDb (noise, 0.0f, -60.0f), -40.0 },
-        { "clicks @ tonal corner (click rejection)",  rejectionDb (clicks,0.0f, -60.0f), -40.0 },
+        { "clicks @ tonal corner (click rejection)", rejectionDb (clicks,0.0f, -60.0f), -40.0 },
     }};
 
     std::printf ("\n=== ISOLATION TARGETS (separation=%.0f%%) ===\n", separationPct);
@@ -604,6 +625,50 @@ bool checkHarmonicDetector()
                  ok ? "PASS" : "FAIL", tonalAtPeak, tonalOffPeak);
     return ok;
 }
+
+// LowFreqPartialTracker discriminates a sustained low tone (gets overridden
+// toward tonal) from a frequency-jittering low peak / noise (never confirmed,
+// no override). Two cases:
+//   HAPPY: a steady 100 Hz tone -> override at the tone bin rises to ~1.
+//   EDGE:  a low peak whose frequency jumps every frame -> never confirmed,
+//          override stays ~0 (the temporal-stability discriminator at work).
+bool checkLowFreqTracker()
+{
+    const int fftSize = 2048, numBins = fftSize / 2 + 1;
+    const double binHz = kSR / fftSize;
+    const int toneBin = (int) std::round (100.0 / binHz);   // ~bin 4
+
+    auto runFrames = [&] (bool jitter)
+    {
+        LowFreqPartialTracker tr;
+        tr.prepare (numBins, kSR);
+        std::vector<float> mag (numBins, 0.02f);  // low broadband floor
+        std::vector<float> mask (numBins, 0.0f);
+        juce::Random rng (7);
+        for (int f = 0; f < 40; ++f)
+        {
+            std::fill (mag.begin(), mag.end(), 0.02f);
+            // place a prominent low peak (+ skirt); steady bin, or jumping bin
+            const int b = jitter ? (2 + rng.nextInt (10)) : toneBin;
+            if (b - 1 >= 0)      mag[(size_t) (b - 1)] = 0.5f;
+            mag[(size_t) b]      = 1.0f;
+            if (b + 1 < numBins) mag[(size_t) (b + 1)] = 0.5f;
+            tr.process (juce::Span<const float> (mag.data(), (size_t) numBins));
+        }
+        std::fill (mask.begin(), mask.end(), 0.0f);
+        tr.applyOverride (juce::Span<float> (mask.data(), (size_t) numBins));
+        float peak = 0.0f;
+        for (int b = 0; b < numBins; ++b) peak = std::max (peak, mask[(size_t) b]);
+        return peak;
+    };
+
+    const float steadyOverride = runFrames (false);
+    const float jitterOverride = runFrames (true);
+    const bool ok = steadyOverride > 0.8f && jitterOverride < 0.1f;
+    std::printf ("  [%s] low-freq tracker: steady=%.3f (want>0.8)  jitter=%.3f (want<0.1)\n",
+                 ok ? "PASS" : "FAIL", steadyOverride, jitterOverride);
+    return ok;
+}
 } // namespace
 
 int main()
@@ -641,6 +706,7 @@ int main()
     targetsOk &= checkHarmonicDetector();
     targetsOk &= checkComputeMasksWithTonal();
     targetsOk &= checkAnalysisOnlyMagnitude();
+    targetsOk &= checkLowFreqTracker();
     targetsOk &= checkIsolationTargets (85.0f);
     targetsOk &= checkIsolationTargets (100.0f);
 
