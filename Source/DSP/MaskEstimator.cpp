@@ -213,6 +213,52 @@ void MaskEstimator::computeMasks(juce::Span<float> tonalMask,
     // both failure modes.
     juce::FloatVectorOperations::copy(previousSmoothedMask.data(), smoothedMask.data(), numBins);
 
+    // Apply spectral floor + frequency blur + the mass-conserving 3-stream
+    // split. Factored into a shared tail so computeMasksWithTonal() reuses the
+    // identical post-processing without duplicating it. smoothedMask /
+    // previousSmoothedMask are already in the exact state the shipped code left
+    // them in here, so behaviour is unchanged.
+    finalizeMasksFromSmoothed(tonalMask, transientMask, noiseMask);
+}
+
+void MaskEstimator::computeMasksWithTonal(juce::Span<const float> externalTonalMask,
+                                          juce::Span<float> tonalMask,
+                                          juce::Span<float> transientMask,
+                                          juce::Span<float> noiseMask) noexcept
+{
+    jassert(isInitialized);
+    jassert(externalTonalMask.size() == static_cast<size_t>(numBins));
+    jassert(tonalMask.size() == static_cast<size_t>(numBins));
+    jassert(transientMask.size() == static_cast<size_t>(numBins));
+    jassert(noiseMask.size() == static_cast<size_t>(numBins));
+
+    // Seed combinedMask from the EXTERNALLY supplied tonal mask (already
+    // reconciled to this grid by the long-grid HarmonicMaskDetector) instead of
+    // recomputing this estimator's own horizontal-median/Wiener tonal estimate.
+    // Everything downstream — the asymmetric smoother, spectral floor, frequency
+    // blur, and the transient/noise residual split — is the SAME chain the
+    // normal computeMasks() path runs, so the Separation/Floor/Brightness
+    // controls keep working. The transient envelope still uses spectralFlux,
+    // which the caller is expected to have populated via updateGuides()/
+    // updateStats() on THIS grid before calling.
+    for (int i = 0; i < numBins; ++i)
+        combinedMask[i] = clamp01(externalTonalMask[i]);
+
+    // Same temporal smoothing as the normal path.
+    applyAsymmetricSmoothing();
+
+    // Same snapshot ordering as computeMasks(): capture the smoother's OUTPUT
+    // (smoothedMask), BEFORE floor/blur, as next frame's IIR recurrence state.
+    juce::FloatVectorOperations::copy(previousSmoothedMask.data(), smoothedMask.data(), numBins);
+
+    // Same shared tail: floor + blur + mass-conserving 3-stream split.
+    finalizeMasksFromSmoothed(tonalMask, transientMask, noiseMask);
+}
+
+void MaskEstimator::finalizeMasksFromSmoothed(juce::Span<float> tonalMask,
+                                              juce::Span<float> transientMask,
+                                              juce::Span<float> noiseMask) noexcept
+{
     // Apply spectral floor BEFORE frequency blur. At high threshold the floor
     // pushes a narrow peak's mask up toward 1.0; doing this before the blur
     // means the blur smears a "1.0" peak (mild effect), not a borderline 0.5
@@ -254,10 +300,6 @@ void MaskEstimator::computeMasks(juce::Span<float> tonalMask,
         transientMask[i] = nonTonal * tr;
         noiseMask[i]     = nonTonal * (1.0f - tr);
     }
-
-    // (previousSmoothedMask was snapshotted earlier from smoothedMask — the
-    // smoother's own output, pre floor/blur — so next frame's IIR recurses on
-    // a clean Wiener-derived signal, not on the floored/blurred result.)
 }
 
 void MaskEstimator::computeHorizontalMedian() noexcept

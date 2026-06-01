@@ -381,6 +381,36 @@ bool checkMaskReconciler()
                  ok ? "PASS" : "FAIL", atBand, farAway, (int) inBounds);
     return ok;
 }
+bool checkComputeMasksWithTonal()
+{
+    const int fftSize = 2048, numBins = fftSize/2 + 1;
+    MaskEstimator est; est.prepare (numBins, kSR);
+    est.setSeparation (0.85f); est.setSpectralFloor (0.0f);
+    std::vector<float> mag (numBins, 0.2f);              // some broadband content for flux/transient
+    std::vector<float> ext (numBins, 0.0f);             // external tonal mask: 1.0 in a band
+    for (int b = 100; b < 140; ++b) ext[(size_t) b] = 1.0f;
+    std::vector<float> t (numBins), tr (numBins), n (numBins);
+    bool sumsOk = true; float maxErr = 0.0f;
+    for (int f = 0; f < 30; ++f)
+    {
+        est.updateGuides (juce::Span<const float>(mag.data(), (size_t) numBins));
+        est.updateStats  (juce::Span<const float>(mag.data(), (size_t) numBins));
+        est.computeMasksWithTonal (juce::Span<const float>(ext.data(), (size_t) numBins),
+                                   juce::Span<float>(t), juce::Span<float>(tr), juce::Span<float>(n));
+    }
+    for (int b = 0; b < numBins; ++b)
+    {
+        const float s = t[(size_t) b] + tr[(size_t) b] + n[(size_t) b];
+        maxErr = std::max (maxErr, std::abs (s - 1.0f));
+        if (std::abs (s - 1.0f) > 1e-4f) sumsOk = false;
+    }
+    // The external tonal band should dominate the tonal mask there.
+    const float tonalInBand = t[120];
+    const bool ok = sumsOk && tonalInBand > 0.5f;
+    std::printf ("  [%s] computeMasksWithTonal: maxSumErr=%.2e  tonal@band=%.3f\n",
+                 ok ? "PASS" : "FAIL", maxErr, tonalInBand);
+    return ok;
+}
 bool checkHarmonicDetector()
 {
     const int longFft = 8192, numBins = longFft / 2 + 1;
@@ -429,6 +459,7 @@ int main()
     bool targetsOk = true;
     targetsOk &= checkMaskReconciler();
     targetsOk &= checkHarmonicDetector();
+    targetsOk &= checkComputeMasksWithTonal();
     targetsOk &= checkAnalysisOnlyMagnitude();
     targetsOk &= checkIsolationTargets (85.0f);
     targetsOk &= checkIsolationTargets (100.0f);

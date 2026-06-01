@@ -72,6 +72,27 @@ public:
                       juce::Span<float> noiseMask) noexcept;
 
     /**
+     * Variant of computeMasks() that uses an externally supplied tonal mask
+     * (e.g. from the long-grid HarmonicMaskDetector, reconciled to this grid)
+     * instead of this estimator's own horizontal-median tonal estimate.
+     * The transient envelope + noise residual are still computed on THIS grid,
+     * and the Separation/Floor/Brightness post-processing still applies.
+     *
+     * Caller contract: updateGuides() and updateStats() must be called first
+     * on THIS grid so spectralFlux is valid for the transient envelope follower.
+     * All spans must be size numBins.
+     *
+     * @param externalTonalMask  Pre-computed tonal mask in [0,1], size numBins
+     * @param tonalMask          Output: tonal stream mask
+     * @param transientMask      Output: transient stream mask
+     * @param noiseMask          Output: noise stream mask
+     */
+    void computeMasksWithTonal (juce::Span<const float> externalTonalMask,
+                                juce::Span<float> tonalMask,
+                                juce::Span<float> transientMask,
+                                juce::Span<float> noiseMask) noexcept;
+
+    /**
      * Set separation amount (0-1).
      * 0 = no separation (masks at 0.5), 1 = full separation
      * @param amount Separation amount in range [0, 1]
@@ -245,7 +266,21 @@ private:
      * Uses Gaussian-like kernel for smooth spectral transitions.
      */
     void applyFrequencyBlur() noexcept;
-    
+
+    /**
+     * Shared tail for both computeMasks() and computeMasksWithTonal().
+     *
+     * Assumes smoothedMask already holds the post-asymmetric-smoothing tonal
+     * mask AND that previousSmoothedMask has been snapshotted from it (both done
+     * by the caller, BEFORE this runs — matching the shipped ordering). This
+     * helper then applies the spectral floor, the frequency blur, and the
+     * mass-conserving 3-stream split (transient envelope over spectralFlux,
+     * t = clamp01(smoothedMask), transient = (1-t)*tr, noise = (1-t)*(1-tr)).
+     */
+    void finalizeMasksFromSmoothed (juce::Span<float> tonalMask,
+                                    juce::Span<float> transientMask,
+                                    juce::Span<float> noiseMask) noexcept;
+
     // Utility methods
     
     /**
