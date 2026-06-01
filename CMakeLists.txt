@@ -94,6 +94,8 @@ target_sources(Unravel
         Source/DSP/MaskEstimator.h
         Source/DSP/HarmonicMaskDetector.cpp
         Source/DSP/HarmonicMaskDetector.h
+        Source/DSP/MaskReconciler.cpp
+        Source/DSP/MaskReconciler.h
         Source/DSP/HPSSProcessor.cpp
         Source/DSP/HPSSProcessor.h
         Source/GUI/CustomLookAndFeel.cpp

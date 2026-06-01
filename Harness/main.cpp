@@ -15,6 +15,7 @@
 #include "HPSSProcessor.h"
 #include "MaskEstimator.h"
 #include "HarmonicMaskDetector.h"
+#include "MaskReconciler.h"
 #include "STFTProcessor.h"
 
 #include <array>
@@ -359,6 +360,27 @@ bool checkAnalysisOnlyMagnitude()
     std::printf ("  [%s] analysisOnly magnitude peak at expected bin\n", ok ? "PASS" : "FAIL");
     return ok;
 }
+bool checkMaskReconciler()
+{
+    const int longFft = 8192, shortFft = 2048;
+    const int nL = longFft/2 + 1, nS = shortFft/2 + 1;
+    MaskReconciler rec; rec.prepare (nL, nS);
+    std::vector<float> longMask (nL, 0.0f), shortMask (nS, 0.0f);
+    // Put a 1.0 band on the long grid around 4 kHz; expect ~1 at the matching short bin, ~0 far away.
+    const int loBin = (int) std::round (4000.0 / (kSR / longFft));
+    for (int b = loBin - 20; b <= loBin + 20; ++b) if (b >= 0 && b < nL) longMask[(size_t) b] = 1.0f;
+    rec.map (longMask, shortMask);
+    const int sBin = (int) std::round (4000.0 / (kSR / shortFft));
+    const float atBand = shortMask[(size_t) sBin];
+    const float farAway = shortMask[(size_t) (nS / 10)]; // ~2.4 kHz — well away from the 4 kHz band
+    // NOTE: nS/6 (~3984 Hz at 48 kHz) falls inside the mapped band; nS/10 is the correct far-away probe.
+    // bounds: nothing should exceed [0,1]
+    bool inBounds = true; for (float v : shortMask) if (v < -1e-6f || v > 1.0f + 1e-6f) inBounds = false;
+    const bool ok = atBand > 0.9f && farAway < 0.1f && inBounds;
+    std::printf ("  [%s] mask reconciler: band=%.3f far=%.3f inBounds=%d\n",
+                 ok ? "PASS" : "FAIL", atBand, farAway, (int) inBounds);
+    return ok;
+}
 bool checkHarmonicDetector()
 {
     const int longFft = 8192, numBins = longFft / 2 + 1;
@@ -405,6 +427,7 @@ int main()
     runMaskAttribution (85.0f, 0.0f);
 
     bool targetsOk = true;
+    targetsOk &= checkMaskReconciler();
     targetsOk &= checkHarmonicDetector();
     targetsOk &= checkAnalysisOnlyMagnitude();
     targetsOk &= checkIsolationTargets (85.0f);
