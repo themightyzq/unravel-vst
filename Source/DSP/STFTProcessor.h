@@ -59,7 +59,7 @@ public:
                    (fftSize & (fftSize - 1)) == 0 && // Power of 2
                    hopSize > 0 && 
                    hopSize <= fftSize &&
-                   fftSize <= 8192; // Reasonable upper limit
+                   fftSize <= 16384; // Reasonable upper limit (was 8192; raised for long analysis FFT)
         }
         
         int getNumBins() const noexcept { return fftSize / 2 + 1; }
