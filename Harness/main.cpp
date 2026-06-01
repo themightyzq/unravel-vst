@@ -293,6 +293,46 @@ void runMaskAttribution (float separationPct, float spectralFloor01)
     std::printf ("  NOTE: at the NOISE-ONLY corner, the SINE's 'tonal' share is silenced but its\n");
     std::printf ("        'noise'+'transient' share survives -> that residual IS the tone bleed.\n");
 }
+// Returns false if any isolation target is missed. Prints a PASS/FAIL line per check.
+bool checkIsolationTargets (float separationPct)
+{
+    const float sep01 = separationPct / 100.0f;
+    bool ok = true;
+
+    std::vector<float> sine (kBlock * 8), noise (kBlock * 8),
+                       clicks (kBlock * 8), saber (kBlock * 16);
+    genSine (sine, 440.0, 0.5f);
+    genNoise (noise, 0.5f, 1234);
+    genClickTrain (clicks, 8.0, 0.9f);
+    genLightsaber (saber, 777);
+
+    auto rejectionDb = [&] (const std::vector<float>& sig, float tonalDb, float noiseDb)
+    {
+        ResolvedParams full   = resolveParams (0.0f, 0.0f, 0.0f, 0.0f);
+        ResolvedParams corner = resolveParams (tonalDb, noiseDb, 0.0f, 0.0f);
+        const double eFull   = measureOutputEnergy (sig, sep01, 0.0f, full);
+        const double eCorner = measureOutputEnergy (sig, sep01, 0.0f, corner);
+        return toDb (eCorner / std::max (eFull, 1e-30));
+    };
+
+    struct Check { const char* label; double db; double targetMaxDb; };
+    const std::array<Check,4> checks = {{
+        { "sine  @ noise corner (tonal rejection)",  rejectionDb (sine,  -60.0f, 0.0f), -50.0 },
+        { "saber @ noise corner (hum rejection)",    rejectionDb (saber, -60.0f, 0.0f), -50.0 },
+        { "noise @ tonal corner (noise rejection)",  rejectionDb (noise, 0.0f, -60.0f), -40.0 },
+        { "clicks @ tonal corner (click rejection)",  rejectionDb (clicks,0.0f, -60.0f), -40.0 },
+    }};
+
+    std::printf ("\n=== ISOLATION TARGETS (separation=%.0f%%) ===\n", separationPct);
+    for (const auto& c : checks)
+    {
+        const bool pass = c.db <= c.targetMaxDb;
+        ok = ok && pass;
+        std::printf ("  [%s] %-42s  %+7.2f dB  (target <= %.0f dB)\n",
+                     pass ? "PASS" : "FAIL", c.label, c.db, c.targetMaxDb);
+    }
+    return ok;
+}
 } // namespace
 
 int main()
@@ -323,6 +363,11 @@ int main()
     runMaskAttribution (100.0f, 1.0f);
     runMaskAttribution (85.0f, 0.0f);
 
-    std::printf ("\nDone.\n");
-    return 0;
+    bool targetsOk = true;
+    targetsOk &= checkIsolationTargets (85.0f);
+    targetsOk &= checkIsolationTargets (100.0f);
+
+    std::printf ("\n%s\n", targetsOk ? "ALL ISOLATION TARGETS MET."
+                                     : "ISOLATION TARGETS NOT MET (expected pre-implementation).");
+    return targetsOk ? 0 : 1;
 }
