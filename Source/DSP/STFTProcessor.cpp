@@ -265,11 +265,6 @@ juce::Span<const float> STFTProcessor::getCurrentMagnitudes() const noexcept
     return { magnitudeBuffer_.data(), (size_t) getNumBins() };
 }
 
-void STFTProcessor::consumeFrame() noexcept
-{
-    frameReady_.store(false, std::memory_order_release);
-}
-
 void STFTProcessor::processInverseTransform() noexcept
 {
     if (config_.analysisOnly) return;

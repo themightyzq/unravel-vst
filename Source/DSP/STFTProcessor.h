@@ -145,11 +145,6 @@ public:
      */
     bool isFrameReady() const noexcept { return frameReady_.load(std::memory_order_acquire); }
 
-    // Mark the current frame as consumed without synthesizing (clears frameReady_).
-    // For analysis-only consumers that read getCurrentMagnitudes()/getCurrentFrame()
-    // and do not call setCurrentFrame(). Lets pushAndProcess() produce the next frame.
-    void consumeFrame() noexcept;
-
     /**
      * Get the processing latency in samples.
      * @return Latency in samples (fftSize - hopSize)
