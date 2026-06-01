@@ -168,6 +168,173 @@ double measureOutputEnergy (const std::vector<float>& signal,
 
 double toDb (double ratio) { return ratio <= 1e-30 ? -300.0 : 10.0 * std::log10 (ratio); }
 
+// -------------------------------------------------------------------------
+// Goertzel single-frequency power estimator.
+// Returns the power (sum of squared real+imag) of frequency freqHz over the
+// n-sample buffer x, normalised by n so amplitudes are comparable across
+// different buffer lengths.
+// -------------------------------------------------------------------------
+double goertzelPower (const float* x, int n, double freqHz, double sr)
+{
+    const double omega = 2.0 * M_PI * freqHz / sr;
+    const double coeff = 2.0 * std::cos (omega);
+    double s0 = 0.0, s1 = 0.0, s2 = 0.0;
+    for (int i = 0; i < n; ++i)
+    {
+        s0 = (double) x[i] + coeff * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+    }
+    // Final power: real^2 + imag^2
+    const double real = s1 - s2 * std::cos (omega);
+    const double imag =       s2 * std::sin (omega);
+    return (real * real + imag * imag) / (double) n;
+}
+
+// -------------------------------------------------------------------------
+// Like measureOutputEnergy but accumulates the full post-warmup output into
+// a buffer, then returns Goertzel power summed over the supplied target freqs.
+// Also returns whole-signal energy via the out-param for comparison.
+// -------------------------------------------------------------------------
+double measureBandEnergy (const std::vector<float>& signal,
+                          float separation01, float focus01,
+                          const ResolvedParams& p,
+                          const std::vector<double>& targetFreqsHz,
+                          double* outWholeEnergy = nullptr)
+{
+    HPSSProcessor proc (false);
+    proc.prepare (kSR, kBlock);
+    proc.setSeparation (separation01);
+    proc.setFocus (focus01);
+    proc.setSpectralFloor (p.spectralFloor);
+
+    std::vector<float> in (kBlock, 0.0f), out (kBlock, 0.0f);
+    std::vector<float> outputBuf;
+    outputBuf.reserve ((size_t) ((kNumBlocks - kWarmupBlocks) * kBlock));
+    double wholeEnergy = 0.0;
+    size_t readPos = 0;
+
+    for (int b = 0; b < kNumBlocks; ++b)
+    {
+        for (int i = 0; i < kBlock; ++i)
+        {
+            in[(size_t) i] = signal[readPos % signal.size()];
+            ++readPos;
+        }
+        proc.processBlock (in.data(), out.data(), kBlock,
+                           p.tonalGain, p.noiseGain, p.transientGain);
+
+        if (b >= kWarmupBlocks)
+        {
+            for (int i = 0; i < kBlock; ++i)
+            {
+                outputBuf.push_back (out[(size_t) i]);
+                wholeEnergy += (double) out[(size_t) i] * out[(size_t) i];
+            }
+        }
+    }
+
+    if (outWholeEnergy) *outWholeEnergy = wholeEnergy;
+
+    // Sum Goertzel power at each target frequency
+    double bandPower = 0.0;
+    const int N = (int) outputBuf.size();
+    for (double f : targetFreqsHz)
+        bandPower += goertzelPower (outputBuf.data(), N, f, kSR);
+    return bandPower;
+}
+
+// -------------------------------------------------------------------------
+// HUM RESIDUAL DIAGNOSTIC
+// Separates true hum bleed from legitimate crackle energy at the noise corner.
+// -------------------------------------------------------------------------
+void runHumResidualDiagnostic()
+{
+    std::printf ("\n");
+    std::printf ("================================================================\n");
+    std::printf ("  HUM RESIDUAL DIAGNOSTIC (Goertzel frequency-selective)\n");
+    std::printf ("================================================================\n");
+
+    // -- Build signals ---------------------------------------------------
+    const int bufLen = kBlock * 16; // same length as saber in checkIsolationTargets
+
+    // Hum-ONLY signal: exact same partials + amps as genLightsaber, NO crackle.
+    const double hum100 = seamlessFreq (100.0, bufLen);
+    const double hum160 = seamlessFreq (160.0, bufLen);
+    std::vector<float> humOnly (bufLen);
+    for (int n = 0; n < bufLen; ++n)
+    {
+        const double t = (double) n / kSR;
+        humOnly[(size_t) n] = 0.35f * (float) std::sin (2.0 * M_PI * hum100 * t)
+                            + 0.20f * (float) std::sin (2.0 * M_PI * hum160 * t);
+    }
+
+    // Full lightsaber (hum + crackle)
+    std::vector<float> saber (bufLen);
+    genLightsaber (saber, 777);
+
+    // -- Params ----------------------------------------------------------
+    const float sep01 = 0.85f; // match the primary test separation
+    ResolvedParams full      = resolveParams (0.0f,   0.0f, 0.0f, 0.0f);
+    ResolvedParams noiseOnly = resolveParams (-60.0f, 0.0f, 0.0f, 0.0f);
+
+    // Hum frequencies (actual seamless-snapped values)
+    const std::vector<double> humFreqs = { hum100, hum160 };
+    // A crackle-band probe frequency (3 kHz is well above the hum, in the crackle bed)
+    const std::vector<double> crackleFreq = { 3000.0 };
+
+    // ---- A. HUM-ONLY whole-signal rejection at noise corner ------------
+    double humOnlyFull, humOnlyCorner;
+    measureBandEnergy (humOnly, sep01, 0.0f, full,      {}, &humOnlyFull);
+    measureBandEnergy (humOnly, sep01, 0.0f, noiseOnly, {}, &humOnlyCorner);
+    const double humOnlyRejDb = toDb (humOnlyCorner / std::max (humOnlyFull, 1e-30));
+
+    std::printf ("\n  A. HUM-ONLY signal — whole-signal rejection at noise corner\n");
+    std::printf ("     full-mix energy  : %.4e\n", humOnlyFull);
+    std::printf ("     corner energy    : %.4e\n", humOnlyCorner);
+    std::printf ("     rejection        : %+.2f dB\n", humOnlyRejDb);
+
+    // ---- B. FULL lightsaber: Goertzel at hum freqs — noise corner vs full ----
+    double saberFullWhole, saberCornerWhole;
+    const double saberHumFull   = measureBandEnergy (saber, sep01, 0.0f, full,
+                                                     humFreqs, &saberFullWhole);
+    const double saberHumCorner = measureBandEnergy (saber, sep01, 0.0f, noiseOnly,
+                                                     humFreqs, &saberCornerWhole);
+    const double humGoertzelRejDb = toDb (saberHumCorner / std::max (saberHumFull, 1e-30));
+
+    std::printf ("\n  B. FULL lightsaber — Goertzel HUM-FREQUENCY rejection at noise corner\n");
+    std::printf ("     hum freqs (Hz)        : %.2f  %.2f\n", hum100, hum160);
+    std::printf ("     Goertzel power (full) : %.4e\n", saberHumFull);
+    std::printf ("     Goertzel power (noise corner) : %.4e\n", saberHumCorner);
+    std::printf ("     TRUE hum rejection    : %+.2f dB\n", humGoertzelRejDb);
+
+    // ---- C. FULL lightsaber: crackle-band Goertzel — noise corner vs full ----
+    const double saberCrackFull   = measureBandEnergy (saber, sep01, 0.0f, full,      crackleFreq);
+    const double saberCrackCorner = measureBandEnergy (saber, sep01, 0.0f, noiseOnly, crackleFreq);
+    const double crackleRejDb = toDb (saberCrackCorner / std::max (saberCrackFull, 1e-30));
+
+    std::printf ("\n  C. FULL lightsaber — Goertzel CRACKLE-BAND (3 kHz) at noise corner vs full\n");
+    std::printf ("     Goertzel power (full) : %.4e\n", saberCrackFull);
+    std::printf ("     Goertzel power (noise corner) : %.4e\n", saberCrackCorner);
+    std::printf ("     Crackle retention     : %+.2f dB  (expect ~0 dB = crackle kept)\n", crackleRejDb);
+
+    // ---- D. FULL lightsaber whole-signal: the original −21 dB number -------
+    const double wholeRejDb = toDb (saberCornerWhole / std::max (saberFullWhole, 1e-30));
+
+    std::printf ("\n  D. FULL lightsaber — WHOLE-SIGNAL rejection at noise corner (−21 dB baseline)\n");
+    std::printf ("     whole-signal full-mix energy  : %.4e\n", saberFullWhole);
+    std::printf ("     whole-signal corner energy    : %.4e\n", saberCornerWhole);
+    std::printf ("     whole-signal rejection        : %+.2f dB\n", wholeRejDb);
+
+    std::printf ("\n  SUMMARY\n");
+    std::printf ("  -------\n");
+    std::printf ("  Hum-only whole-signal rejection : %+.2f dB\n", humOnlyRejDb);
+    std::printf ("  Full saber HUM Goertzel rejection: %+.2f dB  <- true hum bleed\n", humGoertzelRejDb);
+    std::printf ("  Full saber CRACKLE retention     : %+.2f dB  <- should be ~0 dB\n", crackleRejDb);
+    std::printf ("  Full saber WHOLE-signal          : %+.2f dB  <- the original number\n", wholeRejDb);
+    std::printf ("================================================================\n");
+}
+
 struct Corner { const char* name; float tonalDb; float noiseDb; };
 
 void runSignal (const char* sigName, const std::vector<float>& sig,
@@ -466,6 +633,8 @@ int main()
     runMaskAttribution (85.0f, 1.0f);
     runMaskAttribution (100.0f, 1.0f);
     runMaskAttribution (85.0f, 0.0f);
+
+    runHumResidualDiagnostic();
 
     bool targetsOk = true;
     targetsOk &= checkMaskReconciler();
