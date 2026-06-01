@@ -42,6 +42,7 @@ target_sources(unravel_harness PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/DSP/STFTProcessor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/DSP/MagPhaseFrame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/DSP/MaskEstimator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/DSP/HarmonicMaskDetector.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/DSP/HPSSProcessor.cpp
 )
 
