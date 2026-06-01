@@ -4,6 +4,8 @@
 #include "STFTProcessor.h"
 #include "MagPhaseFrame.h"
 #include "MaskEstimator.h"
+#include "HarmonicMaskDetector.h"
+#include "MaskReconciler.h"
 #include <memory>
 #include <vector>
 
@@ -246,9 +248,21 @@ public:
 
 private:
     // === Core Components ===
-    std::unique_ptr<STFTProcessor> stftProcessor_;      ///< STFT analysis/synthesis
+    std::unique_ptr<STFTProcessor> stftProcessor_;      ///< STFT analysis/synthesis (short 2048/512)
     std::unique_ptr<MagPhaseFrame> magPhaseFrame_;      ///< Magnitude/phase conversion
     std::unique_ptr<MaskEstimator> maskEstimator_;      ///< HPSS mask estimation
+
+    // === Long-FFT tonal-detection path (analysis only) ===
+    // A high-resolution (8192) forward-only STFT feeds the HarmonicMaskDetector,
+    // which produces a clean long-grid tonal probability. The MaskReconciler maps
+    // that mask down onto the short (2048) synthesis grid, where it is fed to
+    // MaskEstimator::computeMasksWithTonal(). Synthesis stays on stftProcessor_.
+    std::unique_ptr<STFTProcessor>        longStft_;          ///< analysis-only, 8192
+    std::unique_ptr<HarmonicMaskDetector> harmonicDetector_;  ///< long-grid tonal probability
+    std::unique_ptr<MaskReconciler>       reconciler_;        ///< long -> short
+    std::vector<float>                    longTonalMask_;     ///< numBinsLong (pre-allocated)
+    std::vector<float>                    shortTonalMask_;    ///< numBins (short, zero-order held)
+    int  longFftSize_ = 8192;
     
     // === Configuration ===
     bool useHighQuality_ = false;                       ///< Quality mode setting

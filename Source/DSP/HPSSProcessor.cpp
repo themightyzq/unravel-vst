@@ -63,7 +63,17 @@ void HPSSProcessor::reset() noexcept
     
     if (maskEstimator_)
         maskEstimator_->reset();
-    
+
+    // Reset the long-FFT tonal-detection path.
+    if (longStft_)
+        longStft_->reset();
+
+    if (harmonicDetector_)
+        harmonicDetector_->reset();
+
+    std::fill(longTonalMask_.begin(), longTonalMask_.end(), 0.0f);
+    std::fill(shortTonalMask_.begin(), shortTonalMask_.end(), 0.0f);
+
     // Reset parameter smoothers (20ms for responsive controls)
     tonalGainSmoother_.reset(currentSampleRate_, 0.02);
     noiseGainSmoother_.reset(currentSampleRate_, 0.02);
@@ -111,6 +121,29 @@ void HPSSProcessor::processBlock(const float* inputBuffer,
 
     // Main processing pipeline
 
+    // 0. Drive the LONG analysis-only STFT with the same input block. When a
+    //    high-resolution frame is ready, run the harmonic detector and reconcile
+    //    its long-grid tonal mask down onto the short synthesis grid. The long
+    //    FFT updates less often than the short one, so shortTonalMask_ is held
+    //    (zero-order hold) between long frames.
+    longStft_->pushAndProcess(inputBuffer, numSamples);
+    while (longStft_->isFrameReady())
+    {
+        harmonicDetector_->process(
+            longStft_->getCurrentMagnitudes(),
+            juce::Span<float>(longTonalMask_));
+
+        reconciler_->map(juce::Span<const float>(longTonalMask_),
+                         juce::Span<float>(shortTonalMask_));
+
+        // Clear frameReady_ so the loop can terminate and the next buffered
+        // frame can form (analysis-only path never calls setCurrentFrame()).
+        longStft_->consumeFrame();
+
+        // Drain any further long frames buffered from this block.
+        longStft_->pushAndProcess(nullptr, 0);
+    }
+
     // 1. Push input samples to STFT processor and produce frame if ready
     stftProcessor_->pushAndProcess(inputBuffer, numSamples);
 
@@ -131,14 +164,19 @@ void HPSSProcessor::processBlock(const float* inputBuffer,
         // Get magnitude data for mask estimation
         auto magnitudes = magPhaseFrame_->getMagnitudes();
 
-        // Update mask estimator with new frame
+        // Update mask estimator with new frame. updateGuides/updateStats are
+        // still required so spectralFlux is valid for the transient envelope
+        // follower inside computeMasksWithTonal().
         maskEstimator_->updateGuides(magnitudes);
         maskEstimator_->updateStats(magnitudes);
 
-        // Compute separation masks (mass-conserving 3-way split)
-        maskEstimator_->computeMasks(juce::Span<float>(tonalMaskBuffer_),
-                                     juce::Span<float>(transientMaskBuffer_),
-                                     juce::Span<float>(noiseMaskBuffer_));
+        // Compute separation masks (mass-conserving 3-way split), using the
+        // long-FFT tonal mask reconciled onto this short grid as the tonal
+        // estimate instead of the short-grid horizontal median.
+        maskEstimator_->computeMasksWithTonal(juce::Span<const float>(shortTonalMask_),
+                                              juce::Span<float>(tonalMaskBuffer_),
+                                              juce::Span<float>(transientMaskBuffer_),
+                                              juce::Span<float>(noiseMaskBuffer_));
 
         // Get current smoothed gain values for this frame
         const float currentTonalGain     = tonalGainSmoother_.getCurrentValue();
@@ -188,6 +226,9 @@ void HPSSProcessor::processBlock(const float* inputBuffer,
 
 int HPSSProcessor::getLatencyInSamples() const noexcept
 {
+    // NOTE (Task 2.4): reports only the SHORT synthesis STFT latency. The long
+    // analysis STFT (8192) adds additional analysis latency that is not yet
+    // reflected here; proper latency reporting is handled in Task 4.2.
     return stftProcessor_ ? stftProcessor_->getLatencyInSamples() : 0;
 }
 
@@ -224,6 +265,11 @@ void HPSSProcessor::setSeparation(float amount) noexcept
     if (maskEstimator_)
     {
         maskEstimator_->setSeparation(separation_);
+    }
+    // Keep the long-grid tonal detector tracking the Separation knob too.
+    if (harmonicDetector_)
+    {
+        harmonicDetector_->setSeparation(separation_);
     }
 }
 
@@ -309,6 +355,26 @@ void HPSSProcessor::initializeComponents() noexcept
     // Apply current separation parameters
     maskEstimator_->setSeparation(separation_);
     maskEstimator_->setFocus(focus_);
+
+    // --- Long-FFT analysis-only tonal-detection path ---
+    // Forward-only STFT at 8192 (hop = fftSize/4) for high-resolution tonal
+    // detection. No synthesis buffers (analysisOnly), so it adds no IFFT cost.
+    longStft_ = std::make_unique<STFTProcessor>(
+        STFTProcessor::Config{ longFftSize_, longFftSize_ / 4, /*analysisOnly*/ true });
+    longStft_->prepare(currentSampleRate_, currentBlockSize_);
+
+    const int numBinsLong = longStft_->getNumBins();
+
+    harmonicDetector_ = std::make_unique<HarmonicMaskDetector>();
+    harmonicDetector_->prepare(numBinsLong);
+    harmonicDetector_->setSeparation(separation_);
+
+    reconciler_ = std::make_unique<MaskReconciler>();
+    reconciler_->prepare(numBinsLong, numBins_);
+
+    // Pre-allocate the long/short tonal-mask buffers (RT-safe — sized here only).
+    longTonalMask_.assign(static_cast<size_t>(numBinsLong), 0.0f);
+    shortTonalMask_.assign(static_cast<size_t>(numBins_), 0.0f);
 
     // Resize mask buffers for new bin count (critical when switching quality modes)
     tonalMaskBuffer_.resize(numBins_, 0.0f);
