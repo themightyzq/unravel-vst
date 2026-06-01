@@ -14,6 +14,7 @@
 #include <JuceHeader.h>
 #include "HPSSProcessor.h"
 #include "MaskEstimator.h"
+#include "HarmonicMaskDetector.h"
 #include "STFTProcessor.h"
 
 #include <array>
@@ -358,6 +359,21 @@ bool checkAnalysisOnlyMagnitude()
     std::printf ("  [%s] analysisOnly magnitude peak at expected bin\n", ok ? "PASS" : "FAIL");
     return ok;
 }
+bool checkHarmonicDetector()
+{
+    const int longFft = 8192, numBins = longFft / 2 + 1;
+    HarmonicMaskDetector det; det.prepare (numBins); det.setSeparation (0.85f);
+    std::vector<float> mag (numBins, 0.0f), mask (numBins, 0.0f);
+    const int sineBin = (int) std::round (440.0 / (kSR / longFft));
+    mag[(size_t) sineBin] = 1.0f;                       // a clean tone, almost no skirt at 8192
+    for (int f = 0; f < 40; ++f) det.process (mag, mask); // settle the median
+    const float tonalAtPeak = mask[(size_t) sineBin];
+    const float tonalOffPeak = mask[(size_t) (numBins / 3)]; // empty bin
+    const bool ok = tonalAtPeak > 0.95f && tonalOffPeak < 0.10f;
+    std::printf ("  [%s] harmonic detector: peak tonal=%.3f off-peak=%.3f\n",
+                 ok ? "PASS" : "FAIL", tonalAtPeak, tonalOffPeak);
+    return ok;
+}
 } // namespace
 
 int main()
@@ -389,6 +405,7 @@ int main()
     runMaskAttribution (85.0f, 0.0f);
 
     bool targetsOk = true;
+    targetsOk &= checkHarmonicDetector();
     targetsOk &= checkAnalysisOnlyMagnitude();
     targetsOk &= checkIsolationTargets (85.0f);
     targetsOk &= checkIsolationTargets (100.0f);
