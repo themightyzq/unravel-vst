@@ -1,0 +1,149 @@
+Unravel offline DSP measurement harness
+SR=48000  block=512  FFT=2048/512 (high quality)
+Measuring blocks 120..400 (post-warmup)
+
+=== Signal: pure sine 440Hz   (separation=85%) ===
+  Reference full-mix energy: 1.7899e+04
+  Corner                                 outEnergy  vsFull(dB)       floor
+  TONAL-ONLY  (T=+0dB, N=-inf)          1.6632e+04       -0.32       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          2.1932e+01      -29.12       1.000
+  FULL MIX    (T=+0dB, N=+0dB)          1.7899e+04       +0.00       0.000
+  SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
+
+=== Signal: broadband noise   (separation=85%) ===
+  Reference full-mix energy: 1.2046e+04
+  Corner                                 outEnergy  vsFull(dB)       floor
+  TONAL-ONLY  (T=+0dB, N=-inf)          1.0950e+00      -40.41       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          2.5891e+03       -6.68       1.000
+  FULL MIX    (T=+0dB, N=+0dB)          1.2046e+04       +0.00       0.000
+  SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
+
+=== Signal: click train 8Hz   (separation=85%) ===
+  Reference full-mix energy: 5.6700e+01
+  Corner                                 outEnergy  vsFull(dB)       floor
+  TONAL-ONLY  (T=+0dB, N=-inf)          3.2599e-08      -92.40       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          7.6014e-01      -18.73       1.000
+  FULL MIX    (T=+0dB, N=+0dB)          5.6700e+01       +0.00       0.000
+  SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
+
+=== Signal: lightsaber hum+crackle   (separation=85%) ===
+  Reference full-mix energy: 1.1768e+04
+  Corner                                 outEnergy  vsFull(dB)       floor
+  TONAL-ONLY  (T=+0dB, N=-inf)          9.6864e+03       -0.85       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          1.2201e+02      -19.84       1.000
+  FULL MIX    (T=+0dB, N=+0dB)          1.1768e+04       +0.00       0.000
+  SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
+
+=== BLEED MATRIX (separation=85%) ===
+  signal           fullMix     tonalCorner(dB)     noiseCorner(dB)
+  sine440       1.7899e+04               -0.32              -29.12
+  noise         1.2046e+04              -40.41               -6.68
+  clicks        5.6700e+01              -92.40              -18.73
+  Interpretation: tonalCorner row 'noise'  = how much NOISE bleeds when isolating TONAL.
+                  noiseCorner row 'sine440' = how much TONE bleeds when isolating NOISE.
+
+=== Signal: pure sine 440Hz   (separation=100%) ===
+  Reference full-mix energy: 1.7899e+04
+  Corner                                 outEnergy  vsFull(dB)       floor
+  TONAL-ONLY  (T=+0dB, N=-inf)          1.6541e+04       -0.34       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          2.4243e+01      -28.68       1.000
+  FULL MIX    (T=+0dB, N=+0dB)          1.7899e+04       +0.00       0.000
+  SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
+
+=== Signal: broadband noise   (separation=100%) ===
+  Reference full-mix energy: 1.2046e+04
+  Corner                                 outEnergy  vsFull(dB)       floor
+  TONAL-ONLY  (T=+0dB, N=-inf)          3.1410e-01      -45.84       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          2.5968e+03       -6.66       1.000
+  FULL MIX    (T=+0dB, N=+0dB)          1.2046e+04       +0.00       0.000
+  SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
+
+=== Signal: click train 8Hz   (separation=100%) ===
+  Reference full-mix energy: 5.6700e+01
+  Corner                                 outEnergy  vsFull(dB)       floor
+  TONAL-ONLY  (T=+0dB, N=-inf)          1.0173e-10     -117.46       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          7.6017e-01      -18.73       1.000
+  FULL MIX    (T=+0dB, N=+0dB)          5.6700e+01       +0.00       0.000
+  SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
+
+=== Signal: lightsaber hum+crackle   (separation=100%) ===
+  Reference full-mix energy: 1.1768e+04
+  Corner                                 outEnergy  vsFull(dB)       floor
+  TONAL-ONLY  (T=+0dB, N=-inf)          9.2086e+03       -1.07       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          1.7502e+02      -18.28       1.000
+  FULL MIX    (T=+0dB, N=+0dB)          1.1768e+04       +0.00       0.000
+  SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
+
+=== BLEED MATRIX (separation=100%) ===
+  signal           fullMix     tonalCorner(dB)     noiseCorner(dB)
+  sine440       1.7899e+04               -0.34              -28.68
+  noise         1.2046e+04              -45.84               -6.66
+  clicks        5.6700e+01             -117.46              -18.73
+  Interpretation: tonalCorner row 'noise'  = how much NOISE bleeds when isolating TONAL.
+                  noiseCorner row 'sine440' = how much TONE bleeds when isolating NOISE.
+
+=== Signal: pure sine 440Hz   (separation=0%) ===
+  Reference full-mix energy: 1.7899e+04
+  Corner                                 outEnergy  vsFull(dB)       floor
+  TONAL-ONLY  (T=+0dB, N=-inf)          1.7478e+04       -0.10       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          1.6751e+00      -40.29       1.000
+  FULL MIX    (T=+0dB, N=+0dB)          1.7899e+04       +0.00       0.000
+  SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
+
+=== Signal: broadband noise   (separation=0%) ===
+  Reference full-mix energy: 1.2046e+04
+  Corner                                 outEnergy  vsFull(dB)       floor
+  TONAL-ONLY  (T=+0dB, N=-inf)          9.3748e+03       -1.09       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          4.1168e+01      -24.66       1.000
+  FULL MIX    (T=+0dB, N=+0dB)          1.2046e+04       +0.00       0.000
+  SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
+
+=== Signal: click train 8Hz   (separation=0%) ===
+  Reference full-mix energy: 5.6700e+01
+  Corner                                 outEnergy  vsFull(dB)       floor
+  TONAL-ONLY  (T=+0dB, N=-inf)          1.8865e+01       -4.78       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          1.5560e-01      -25.62       1.000
+  FULL MIX    (T=+0dB, N=+0dB)          5.6700e+01       +0.00       0.000
+  SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
+
+=== Signal: lightsaber hum+crackle   (separation=0%) ===
+  Reference full-mix energy: 1.1768e+04
+  Corner                                 outEnergy  vsFull(dB)       floor
+  TONAL-ONLY  (T=+0dB, N=-inf)          1.1621e+04       -0.05       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          1.9565e+00      -37.79       1.000
+  FULL MIX    (T=+0dB, N=+0dB)          1.1768e+04       +0.00       0.000
+  SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
+
+=== BLEED MATRIX (separation=0%) ===
+  signal           fullMix     tonalCorner(dB)     noiseCorner(dB)
+  sine440       1.7899e+04               -0.10              -40.29
+  noise         1.2046e+04               -1.09              -24.66
+  clicks        5.6700e+01               -4.78              -25.62
+  Interpretation: tonalCorner row 'noise'  = how much NOISE bleeds when isolating TONAL.
+                  noiseCorner row 'sine440' = how much TONE bleeds when isolating NOISE.
+
+=== MASK ATTRIBUTION (sep=85%, floor=1.00) ===
+  Steady SINE  @ bin 19:  tonal=1.0000  transient=0.0000  noise=0.0000  (sum=1.000)
+  Steady NOISE @ bin 256:  tonal=0.0000  transient=0.0004  noise=0.9996  (sum=1.000)
+  SINE skirt profile (tonal mask) around peak bin 19:
+    b15:0.000 b16:0.000 b17:0.000 b18:1.000 b19:1.000 b20:1.000 b21:0.000 b22:0.000 b23:0.000
+  NOTE: at the NOISE-ONLY corner, the SINE's 'tonal' share is silenced but its
+        'noise'+'transient' share survives -> that residual IS the tone bleed.
+
+=== MASK ATTRIBUTION (sep=100%, floor=1.00) ===
+  Steady SINE  @ bin 19:  tonal=1.0000  transient=0.0000  noise=0.0000  (sum=1.000)
+  Steady NOISE @ bin 256:  tonal=0.0000  transient=0.0004  noise=0.9996  (sum=1.000)
+  SINE skirt profile (tonal mask) around peak bin 19:
+    b15:0.000 b16:0.000 b17:0.000 b18:1.000 b19:1.000 b20:1.000 b21:0.000 b22:0.000 b23:0.000
+  NOTE: at the NOISE-ONLY corner, the SINE's 'tonal' share is silenced but its
+        'noise'+'transient' share survives -> that residual IS the tone bleed.
+
+=== MASK ATTRIBUTION (sep=85%, floor=0.00) ===
+  Steady SINE  @ bin 19:  tonal=0.9997  transient=0.0000  noise=0.0003  (sum=1.000)
+  Steady NOISE @ bin 256:  tonal=0.0060  transient=0.0004  noise=0.9936  (sum=1.000)
+  SINE skirt profile (tonal mask) around peak bin 19:
+    b15:0.025 b16:0.025 b17:0.268 b18:0.756 b19:1.000 b20:0.756 b21:0.268 b22:0.025 b23:0.025
+  NOTE: at the NOISE-ONLY corner, the SINE's 'tonal' share is silenced but its
+        'noise'+'transient' share survives -> that residual IS the tone bleed.
+
+Done.

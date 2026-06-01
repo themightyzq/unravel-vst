@@ -65,3 +65,6 @@ __pycache__/
 
 # docs/ and Documentation/ are tracked — README and CLAUDE.md
 # both reference content inside them. Untracked previously by mistake.
+
+# Offline DSP measurement harness build output
+build-harness/
