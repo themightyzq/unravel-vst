@@ -1,8 +1,43 @@
 # Multi-Resolution HPSS — True Stream Isolation
 
 **Date:** 2026-06-01
-**Status:** Design approved; pending spec review → implementation plan
+**Status:** SUPERSEDED by Revision 2 (below). The original multi-resolution design was implemented, measured, and **reverted** — see "Revision 2" for the finding and the replacement design now in effect.
 **Scope:** DSP only (`Source/DSP/`). UI redesign is a separate, later sub-project.
+
+---
+
+## Revision 2 (2026-06-01) — Multi-resolution reverted; noise-stream skirt dilation adopted
+
+### What happened
+The multi-resolution approach (long 8192 analysis FFT → `HarmonicMaskDetector` → `MaskReconciler` → `MaskEstimator::computeMasksWithTonal`) was fully built (units committed: `HarmonicMaskDetector`, `MaskReconciler`, `computeMasksWithTonal`) and wired into `HPSSProcessor`. Measured end-to-end, it **regressed every isolation metric** (noise corner −29→−7 dB, tonal corner −40→−25 dB). The wiring commit was reverted; the standalone units remain on `main`, inert.
+
+### Why the premise was wrong
+- A real windowed tone does **not** occupy a single bin even at 8192 — it lands between bin centers (e.g. 440 Hz → long-bin 75.09), scalloping into a ~5-bin leakage cluster with a notch at the nominal peak.
+- The long-grid harmonic detector's vertical-median guide picks up the tone's own skirt and self-suppresses: it read **tonal ≈ 0.018** at a real tone, versus the original **2048 path's clean tonal ≈ 1.0**.
+- Reconciliation-averaging + zero-order-hold blurred the mask further; the transient follower then claimed the large residual.
+- **Key realization:** the original 2048 detection already classifies the tone peak correctly. The −29 dB residual is **not** peak misclassification — it is the windowed tone's **skirt bins**, where `tonal` falls to ~0.7 so `noise = (1−0.7)·… ≈ 0.3` survives into the noise stream. A bigger FFT does not fix this; it makes detection worse.
+
+### Replacement design — tonal-skirt dilation in the noise stream (APPROVED)
+Operate entirely on the existing 2048 grid (no latency change, no new FFT). In `MaskEstimator`, after the tonal mask `smoothedMask` is finalized (post floor/blur) and **before** the 3-stream split, apply a **grayscale morphological dilation** of the tonal mask around sustained tonal peaks so the leakage skirt is reassigned from the noise stream to tonal:
+
+- **Tonal core detection:** a bin is a tonal core where `smoothedMask[i]` is high (e.g. > ~0.6) — optionally gated by the sustained (`horizontalGuide`) evidence so transients/broadband don't trigger dilation.
+- **Dilation:** for each core, raise neighbours within ±W bins via a decaying falloff: `t[i±k] = max(t[i±k], t[core]·falloff(k))`, W ≈ 3–5 bins (covers the 2048 Hann skirt).
+- **Mass conservation preserved:** the split still uses `tonal = t`, `transient = (1−t)·tr`, `noise = (1−t)·(1−tr)` — sum = 1 per bin. Dilation only moves skirt energy from noise→tonal, so FULL-MIX reconstruction is unchanged (unity).
+- **Strength tied to `spectralFloorThreshold`** (0 = off / natural blend; 1 = full skirt claim). The existing corner-lift already drives `spectralFloorThreshold`→1 at the pad corners and Solo, so dilation engages exactly when the user asks for isolation and stays out of the way during natural blending.
+- **RT-safe:** new work is a bounded per-bin neighbourhood pass over pre-allocated buffers; no allocation/locks.
+
+Because Solo/corners already drive `spectralFloorThreshold`→1, this fixes the noise corner **and** Solo-Noise symmetrically, and (applied to the tonal mask generally) does not harm the already-good tonal/transient corners.
+
+### Harness measurement hygiene (prerequisite)
+The harness's looped test sine (440 Hz over a 4096-sample buffer = 37.55 cycles) has a wrap-around discontinuity that injects a phantom transient the envelope follower grabs — contaminating the measurement. Fix the generators so looped test tones contain an **integer number of cycles** over the loop buffer (seamless), so the gate measures a genuinely steady tone. Re-establish the post-fix baseline before judging the dilation.
+
+### Targets (unchanged)
+Noise corner / Solo-Noise reject sustained tonal ≥ 50 dB; tonal & transient corners hold ≥ 40 dB; FULL-MIX reconstructs to unity; mass conservation intact. If dilation alone cannot reach ≥ 50 dB without audible damage, escalate before adding spectral subtraction (explicitly deferred).
+
+### Status of the multi-resolution units
+`HarmonicMaskDetector`, `MaskReconciler`, `STFTProcessor::analysisOnly`/`consumeFrame`, and `MaskEstimator::computeMasksWithTonal` remain on `main`, unused. Keep for now (cheap, tested); a later cleanup task may remove them if the skirt-dilation approach ships and they stay unused.
+
+**The sections below describe the SUPERSEDED multi-resolution design, retained for context.**
 
 ---
 
