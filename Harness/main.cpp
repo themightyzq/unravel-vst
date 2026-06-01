@@ -75,6 +75,14 @@ ResolvedParams resolveParams (float tonalDb, float noiseDb, float transientDb,
     return { tonalGain, noiseGain, transientGain, spectralFloor };
 }
 
+// Nearest frequency to `freq` that completes an integer number of cycles in
+// `bufLen` samples at kSR — guarantees seamless looping with no wrap discontinuity.
+double seamlessFreq (double freq, int bufLen)
+{
+    const double cycles = std::round (freq * (double) bufLen / kSR);
+    return (cycles < 1.0 ? 1.0 : cycles) * kSR / (double) bufLen;
+}
+
 // -------------------------------------------------------------------------
 // Synthetic signal generators
 // -------------------------------------------------------------------------
@@ -105,13 +113,16 @@ void genClickTrain (std::vector<float>& x, double hz, float amp)
 // "Lightsaber-like": sustained hum (two low tones) + steady crackle (filtered noise).
 void genLightsaber (std::vector<float>& x, uint32_t seed)
 {
+    // Snap hum partials to integer-cycle frequencies for seamless looping.
+    const double hum100 = seamlessFreq (100.0, (int) x.size());
+    const double hum160 = seamlessFreq (160.0, (int) x.size());
     juce::Random rng ((juce::int64) seed);
     float lp = 0.0f;
     for (size_t n = 0; n < x.size(); ++n)
     {
         const double t = (double) n / kSR;
-        float hum = 0.35f * std::sin (2.0 * M_PI * 100.0 * t)
-                  + 0.20f * std::sin (2.0 * M_PI * 160.0 * t);
+        float hum = 0.35f * std::sin (2.0 * M_PI * hum100 * t)
+                  + 0.20f * std::sin (2.0 * M_PI * hum160 * t);
         float white = rng.nextFloat() * 2.0f - 1.0f;
         lp += 0.25f * (white - lp);            // mild low-pass -> "crackle" bed
         float crackle = 0.18f * lp;
@@ -200,7 +211,7 @@ void runBleedMatrix (float separationPct)
     const float sep01 = separationPct / 100.0f;
 
     std::vector<float> sine (kBlock * 8), noise (kBlock * 8), clicks (kBlock * 8);
-    genSine (sine, 440.0, 0.5f);
+    genSine (sine, seamlessFreq (440.0, (int) sine.size()), 0.5f);
     genNoise (noise, 0.5f, 1234);
     genClickTrain (clicks, 8.0, 0.9f);
 
@@ -304,7 +315,7 @@ bool checkIsolationTargets (float separationPct)
 
     std::vector<float> sine (kBlock * 8), noise (kBlock * 8),
                        clicks (kBlock * 8), saber (kBlock * 16);
-    genSine (sine, 440.0, 0.5f);
+    genSine (sine, seamlessFreq (440.0, (int) sine.size()), 0.5f);
     genNoise (noise, 0.5f, 1234);
     genClickTrain (clicks, 8.0, 0.9f);
     genLightsaber (saber, 777);
@@ -437,7 +448,7 @@ int main()
     std::printf ("Measuring blocks %d..%d (post-warmup)\n", kWarmupBlocks, kNumBlocks);
 
     std::vector<float> sine (kBlock * 8), noise (kBlock * 8), clicks (kBlock * 8), saber (kBlock * 16);
-    genSine (sine, 440.0, 0.5f);
+    genSine (sine, seamlessFreq (440.0, (int) sine.size()), 0.5f);
     genNoise (noise, 0.5f, 1234);
     genClickTrain (clicks, 8.0, 0.9f);
     genLightsaber (saber, 777);
