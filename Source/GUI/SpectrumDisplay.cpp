@@ -4,7 +4,9 @@
 SpectrumDisplay::SpectrumDisplay()
 {
     setOpaque(true);
-    startTimerHz(30);  // 30 FPS for smooth visuals
+    // Timer is started lazily once the component is actually shown — see
+    // updateTimerState() / visibilityChanged(). Starting it here would burn
+    // 30 FPS of CPU before the editor is ever on screen.
 
     // Accessibility support
     setAccessible(true);
@@ -25,12 +27,30 @@ void SpectrumDisplay::setSnapshotCallback(SnapshotCallback cb)
 void SpectrumDisplay::setEnabled(bool shouldBeEnabled)
 {
     isEnabled = shouldBeEnabled;
-    // Stop timer when disabled to save CPU
-    if (shouldBeEnabled)
-        startTimerHz(30);
-    else
-        stopTimer();
+    updateTimerState();
     repaint();
+}
+
+void SpectrumDisplay::visibilityChanged()
+{
+    updateTimerState();
+}
+
+void SpectrumDisplay::parentHierarchyChanged()
+{
+    // Catches the display being added to / removed from a shown window (e.g.
+    // editor open/close). Note: a host merely minimising or occluding its
+    // window does not reliably fire this — that case is not paused here.
+    updateTimerState();
+}
+
+void SpectrumDisplay::updateTimerState()
+{
+    const bool shouldRun = isEnabled && isShowing();
+    if (shouldRun && ! isTimerRunning())
+        startTimerHz(30);  // 30 FPS for smooth visuals
+    else if (! shouldRun && isTimerRunning())
+        stopTimer();
 }
 
 void SpectrumDisplay::setSampleRate(double sampleRate)

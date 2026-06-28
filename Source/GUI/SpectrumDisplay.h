@@ -67,10 +67,17 @@ public:
     // Component overrides
     void paint(juce::Graphics& g) override;
     void resized() override;
+    // Pause the 30 FPS timer whenever the display is not actually on screen
+    // (editor closed/obscured by the host) — saves CPU when nothing is visible.
+    void visibilityChanged() override;
+    void parentHierarchyChanged() override;
 
 private:
     // Timer callback for visual updates
     void timerCallback() override;
+
+    // Start/stop the refresh timer to match "enabled AND showing".
+    void updateTimerState();
 
     // Data callback (thread-safe snapshot) + scratch buffers it fills.
     SnapshotCallback getSnapshot;
