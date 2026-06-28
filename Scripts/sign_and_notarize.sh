@@ -4,7 +4,8 @@
 # Unravel Plugin Code Signing and Notarization Script
 # =============================================================================
 #
-# This script signs and notarizes the Unravel VST3 plugin for macOS.
+# This script signs and notarizes all three Unravel macOS formats
+# (VST3 + AU .component + Standalone .app).
 #
 # Prerequisites:
 #   1. Apple Developer Program membership ($99/year)
@@ -29,11 +30,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_DIR/build"
 
-# Plugin paths
+# Plugin paths — sign/notarize all three shipped formats. The README points
+# users at the VST3, the AU .component, and the Standalone .app, so all three
+# must be signed or first-launch Gatekeeper rejects the unsigned ones.
 VST3_PATH="$BUILD_DIR/Unravel_artefacts/Release/VST3/Unravel.vst3"
+AU_PATH="$BUILD_DIR/Unravel_artefacts/Release/AU/Unravel.component"
+# Standalone path is overridden via RUNTIME_OUTPUT_DIRECTORY in CMakeLists.txt.
+APP_PATH="$BUILD_DIR/bin/Standalone/Unravel.app"
+BUNDLES=("$VST3_PATH" "$AU_PATH" "$APP_PATH")
 
 # Install paths
 INSTALLED_VST3="$HOME/Library/Audio/Plug-Ins/VST3/Unravel.vst3"
+INSTALLED_AU="$HOME/Library/Audio/Plug-Ins/Components/Unravel.component"
 
 # Colors for output
 RED='\033[0;31m'
@@ -75,7 +83,7 @@ if ! xcrun notarytool history --keychain-profile "$CRED_NAME" &>/dev/null 2>&1; 
 fi
 
 # Step 1: Build the plugin
-echo "Step 1: Building Release version (VST3)..."
+echo "Step 1: Building Release version (VST3 + AU + Standalone)..."
 cd "$PROJECT_DIR"
 rm -rf build
 cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -97,24 +105,37 @@ echo ""
 # Step 2: Sign the plugin
 echo "Step 2: Signing with Developer ID..."
 
-echo "  Signing VST3..."
-codesign --force --deep --options runtime \
-    --sign "$DEVELOPER_ID" \
-    --timestamp \
-    "$VST3_PATH"
-
-# Verify signature
-echo "Verifying signature..."
-codesign --verify --verbose=2 "$VST3_PATH"
-echo -e "${GREEN}Signing complete.${NC}"
+for bundle in "${BUNDLES[@]}"; do
+    if [ ! -e "$bundle" ]; then
+        echo -e "${RED}  Missing bundle: $bundle${NC}"
+        echo "  Build did not produce it — aborting."
+        exit 1
+    fi
+    echo "  Signing $(basename "$bundle")..."
+    codesign --force --deep --options runtime \
+        --sign "$DEVELOPER_ID" \
+        --timestamp \
+        "$bundle"
+    echo "  Verifying $(basename "$bundle")..."
+    codesign --verify --verbose=2 "$bundle"
+done
+echo -e "${GREEN}Signing complete (VST3 + AU + Standalone).${NC}"
 echo ""
 
-# Step 3: Create ZIP for notarization
+# Step 3: Create ZIP for notarization (all three bundles in one submission)
 echo "Step 3: Creating ZIP archive for notarization..."
 ZIP_PATH="$BUILD_DIR/Unravel-macOS.zip"
 rm -f "$ZIP_PATH"
 
-ditto -c -k --keepParent "$VST3_PATH" "$ZIP_PATH"
+# ditto --keepParent only preserves one top dir, so stage the three bundles
+# under a single folder and zip that — notarytool accepts a multi-bundle zip.
+STAGE_DIR="$BUILD_DIR/notarize-stage"
+rm -rf "$STAGE_DIR"
+mkdir -p "$STAGE_DIR"
+for bundle in "${BUNDLES[@]}"; do
+    ditto "$bundle" "$STAGE_DIR/$(basename "$bundle")"
+done
+ditto -c -k --keepParent "$STAGE_DIR" "$ZIP_PATH"
 
 echo -e "${GREEN}ZIP created: $ZIP_PATH${NC}"
 echo ""
@@ -133,17 +154,25 @@ if echo "$SUBMIT_OUTPUT" | grep -q "status: Accepted"; then
     echo -e "${GREEN}Notarization successful!${NC}"
     echo ""
 
-    # Step 5: Staple the ticket
+    # Step 5: Staple the ticket (per bundle — stapler operates on one path)
     echo "Step 5: Stapling notarization ticket..."
-    xcrun stapler staple "$VST3_PATH"
+    for bundle in "${BUNDLES[@]}"; do
+        echo "  Stapling $(basename "$bundle")..."
+        xcrun stapler staple "$bundle"
+    done
     echo -e "${GREEN}Stapling complete.${NC}"
     echo ""
 
-    # Step 6: Install to user plugins folder
-    echo "Step 6: Installing to user plugins folder..."
+    # Step 6: Install plugins to user folders (Standalone .app left in build/)
+    echo "Step 6: Installing to user plugin folders..."
     rm -rf "$INSTALLED_VST3"
     cp -R "$VST3_PATH" "$INSTALLED_VST3"
     echo -e "${GREEN}  VST3 installed to: $INSTALLED_VST3${NC}"
+    mkdir -p "$(dirname "$INSTALLED_AU")"
+    rm -rf "$INSTALLED_AU"
+    cp -R "$AU_PATH" "$INSTALLED_AU"
+    echo -e "${GREEN}  AU installed to:   $INSTALLED_AU${NC}"
+    rm -rf "$STAGE_DIR"   # tidy the notarization staging copies
     echo ""
 
     # Final verification
@@ -151,20 +180,25 @@ if echo "$SUBMIT_OUTPUT" | grep -q "status: Accepted"; then
     echo "  Final Verification"
     echo "=============================================="
     echo ""
-    echo "Checking Gatekeeper assessment..."
+    echo "Validating stapled tickets on all three bundles..."
+    for bundle in "${BUNDLES[@]}"; do
+        echo "  $(basename "$bundle"):"
+        stapler validate "$bundle" || echo -e "${YELLOW}    staple validate failed${NC}"
+    done
+    echo ""
+    echo "Gatekeeper assessment (installed VST3)..."
     spctl --assess --type open --context context:primary-signature -v "$INSTALLED_VST3" 2>&1 || true
     echo ""
-    echo "Checking notarization status..."
-    stapler validate "$INSTALLED_VST3"
-    echo ""
     echo -e "${GREEN}=============================================="
-    echo "  SUCCESS! Plugin is signed and notarized."
+    echo "  SUCCESS! All formats signed and notarized."
     echo "==============================================${NC}"
     echo ""
-    echo "Installed plugin:"
+    echo "Installed plugins:"
     echo "  VST3: $INSTALLED_VST3"
+    echo "  AU:   $INSTALLED_AU"
+    echo "  Standalone .app signed in place: $APP_PATH"
     echo ""
-    echo "Distribution ZIP:"
+    echo "Distribution ZIP (all three, notarized):"
     echo "  $ZIP_PATH"
 
 else
