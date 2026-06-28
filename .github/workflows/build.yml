@@ -60,6 +60,19 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel 4
 
+      - name: DSP isolation gate (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -e
+          # Offline DSP measurement harness — links the shipping DSP and drives
+          # synthetic signals through the real HPSSProcessor, asserting per-corner
+          # isolation targets (>=50 dB noise / >=40 dB tonal). Returns non-zero if
+          # any target is missed, so a DSP regression fails CI. macOS-only: the
+          # harness builds arm64-native and is a measurement tool, not shipped.
+          cmake -S Harness -B build-harness -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-harness
+          ./build-harness/unravel_harness_artefacts/Release/unravel_harness
+
       - name: Verify Universal Binary (macOS)
         if: runner.os == 'macOS'
         run: |
