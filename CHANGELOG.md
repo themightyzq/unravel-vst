@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed (onboarding/reclamation pass, 2026-06-28)
+
+- **`sign_and_notarize.sh` now signs, notarizes, and staples all three macOS formats** (VST3 + AU `.component` + Standalone `.app`) and installs the AU, instead of VST3 only. The README directs users to all three, so the AU and Standalone previously shipped unsigned and tripped Gatekeeper on first launch.
+- **Spectrum display pauses its 30 FPS repaint timer when off-screen.** The timer now starts lazily and is gated on `isEnabled && isShowing()` (`SpectrumDisplay::updateTimerState`), so no UI CPU is spent before the editor is first shown or after it's closed. (A host merely minimising/occluding its window without a hierarchy change is not caught — partial.)
+
+### Internal (onboarding/reclamation pass, 2026-06-28)
+
+- **CI now runs the offline DSP isolation harness as a gate** (macOS job): builds `Harness/` and fails the build if any per-corner isolation target is missed (≥50 dB noise / ≥40 dB tonal). Regenerated `Harness/last_run.txt` (was stale at −29 dB tone bleed; current code passes all four checks, sine −146 dB).
+- Re-verified the four STFT "critical" findings against current code: C1 (ring-wrap), C4 (first-frame underflow), and C5 (synthesis scale) are fixed/not-real (STFT reconstructs to +0.00 dB across multiple ring wraps); only C6 (unity-path exit-from-unity click) remains, now isolated and low-severity. Confirmed `HarmonicMaskDetector`/`MaskReconciler` are a parked, harness-only path — the live plugin uses `computeMasks` with the integrated `LowFreqPartialTracker`.
+
 ### Fixed (post-`dsp-debugger` audit)
 
 - **`MaskEstimator::computeMasks` post-processing order corrected: floor now runs before blur.** A `dsp-debugger` agent trace of a representative pitched-modulated drone bin under the spectralFloor-coupling change found that the previous order `[smoothing → blur → floor]` had a stable fixed point at `tonalMask ≈ 0.077` for narrow-band tones at `spectralFloor = 1.0`. The blur (center weight 0.5, neighbours near 0 because they're noise) cut a peak's mask from 0.994 to ~0.5, the floor's cubic-ease at `mask < ceilingLevel = 0.5` then pushed it *toward 0*, and prev-frame feedback through asymmetric smoothing settled the collapse. Net audible: at the "fully noise" pad corner, a drone bin was being *amplified by +10.4 dB* (drone going to the noise stream, then receiving the +12 dB noise gain), worse than no coupling at all (+7.6 dB).
