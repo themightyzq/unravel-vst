@@ -35,41 +35,46 @@ STFTProcessor::~STFTProcessor() = default;
 void STFTProcessor::prepare(double sampleRate, int maxBlockSize) noexcept
 {
     sampleRate_ = sampleRate;
-    
-    // Calculate buffer sizes with safety margins
-    const int inputBufferSize = config_.fftSize * 4; // Large enough for circular buffering
+
+    // Calculate buffer sizes with safety margins. fftSize*4 covers every
+    // typical host block; the max() terms guarantee correctness even for
+    // exotic hosts whose block exceeds that (input needs block + one window
+    // of lookback; output needs the latency prime + block backlog + the
+    // pending overlap tail).
+    const int inputBufferSize = std::max(config_.fftSize * 4,
+                                         maxBlockSize + config_.fftSize);
 
     // Resize input ring buffer (analysis path — always needed)
     inputBuffer_.resize(inputBufferSize);
 
     // Allocate analysis processing buffers (aligned for SIMD operations)
-    fftInputBuffer_.resize(config_.fftSize, 0.0f);
-    complexBuffer_.resize(config_.fftSize * 2, 0.0f); // Interleaved real/imag
-    currentFrame_.resize(config_.getNumBins());
-    magnitudeBuffer_.assign(config_.getNumBins(), 0.0f);
+    fftInputBuffer_.resize(static_cast<size_t>(config_.fftSize), 0.0f);
+    complexBuffer_.resize(static_cast<size_t>(config_.fftSize * 2), 0.0f); // Interleaved real/imag
+    currentFrame_.resize(static_cast<size_t>(config_.getNumBins()));
+    magnitudeBuffer_.assign(static_cast<size_t>(config_.getNumBins()), 0.0f);
 
     // Synthesis-only buffers: output ring buffer + IFFT time-domain output.
     // Skipped entirely in analysis-only mode (no IFFT / overlap-add).
     if (! config_.analysisOnly)
     {
-        const int outputBufferSize = config_.fftSize * 4; // Extra space for overlap-add
+        const int outputBufferSize = std::max(config_.fftSize * 4,
+                                              config_.getLatencyInSamples() + maxBlockSize + config_.fftSize);
         outputBuffer_.resize(outputBufferSize);
-        fftOutputBuffer_.resize(config_.fftSize, 0.0f);
+        fftOutputBuffer_.resize(static_cast<size_t>(config_.fftSize), 0.0f);
     }
     
     // Initialize state
     samplesInInputBuffer_ = 0;
-    samplesInOutputBuffer_ = 0; // Start with empty output buffer
     frameReady_.store(false, std::memory_order_release);
     isInitialized_ = true;
     isFirstFrame_ = true;  // First frame needs fftSize samples
-    
+
     // Clear all buffers to ensure clean start
     inputBuffer_.clear();
     if (! config_.analysisOnly)
         outputBuffer_.clear();
 
-    juce::ignoreUnused(maxBlockSize); // Used for documentation only
+    primeOutputLatency();
 }
 
 void STFTProcessor::reset() noexcept
@@ -93,9 +98,29 @@ void STFTProcessor::reset() noexcept
     
     // Reset state
     samplesInInputBuffer_ = 0;
-    samplesInOutputBuffer_ = 0; // Start with empty output buffer
     frameReady_.store(false, std::memory_order_release);
     isFirstFrame_ = true;  // Reset to first frame state
+
+    primeOutputLatency();
+}
+
+void STFTProcessor::primeOutputLatency() noexcept
+{
+    // Prime the output ring with exactly getLatencyInSamples() (= fftSize)
+    // zeros. The first frame needs fftSize input samples and every frame then
+    // yields a hopSize burst, so cumulative production is
+    //   fftSize + hopSize * (floor((t - fftSize) / hopSize) + 1)  >=  t
+    // for every t — extraction can never underflow regardless of the host's
+    // block size or call pattern, and the realised latency is exactly the
+    // reported figure instead of the old block-size-dependent
+    // (fftSize - blockSize) starvation delay. (RingBuffer::clear() has just
+    // zeroed the storage, so advancing the write position exposes zeros.)
+    samplesInOutputBuffer_ = 0;
+    if (! config_.analysisOnly)
+    {
+        outputBuffer_.advanceWritePosition(config_.getLatencyInSamples());
+        samplesInOutputBuffer_ = config_.getLatencyInSamples();
+    }
 }
 
 //==============================================================================
@@ -225,12 +250,13 @@ void STFTProcessor::processForwardTransform() noexcept
 
     // JUCE FFT expects: real samples in FIRST HALF of buffer (indices 0 to fftSize-1)
     // Copy windowed samples directly to first half of complex buffer
-    for (int i = 0; i < config_.fftSize; ++i)
+    const auto fftSize = static_cast<size_t>(config_.fftSize);
+    for (size_t i = 0; i < fftSize; ++i)
     {
         complexBuffer_[i] = fftInputBuffer_[i];
     }
     // Clear second half (used as working space by FFT)
-    for (int i = config_.fftSize; i < config_.fftSize * 2; ++i)
+    for (size_t i = fftSize; i < fftSize * 2; ++i)
     {
         complexBuffer_[i] = 0.0f;
     }
@@ -243,9 +269,9 @@ void STFTProcessor::processForwardTransform() noexcept
     // - [2,3] = bin 1 as [real, imag]
     // - [2*k, 2*k+1] = bin k as [real, imag]
     // Only first (fftSize/2 + 1) bins are unique for real input
-    const int numBins = config_.getNumBins();  // fftSize/2 + 1
+    const auto numBins = static_cast<size_t>(config_.getNumBins());  // fftSize/2 + 1
 
-    for (int i = 0; i < numBins; ++i)
+    for (size_t i = 0; i < numBins; ++i)
     {
         const float real = complexBuffer_[i * 2];
         const float imag = complexBuffer_[i * 2 + 1];
@@ -269,9 +295,9 @@ void STFTProcessor::processInverseTransform() noexcept
 {
     if (config_.analysisOnly) return;
     // Convert std::complex format back to standard interleaved format for JUCE FFT
-    const int numBins = config_.getNumBins();  // fftSize/2 + 1
+    const auto numBins = static_cast<size_t>(config_.getNumBins());  // fftSize/2 + 1
 
-    for (int i = 0; i < numBins; ++i)
+    for (size_t i = 0; i < numBins; ++i)
     {
         complexBuffer_[i * 2] = currentFrame_[i].real();
         complexBuffer_[i * 2 + 1] = currentFrame_[i].imag();
@@ -282,7 +308,8 @@ void STFTProcessor::processInverseTransform() noexcept
     fft_->performRealOnlyInverseTransform(complexBuffer_.data());
 
     // Extract real samples from first half of buffer
-    for (int i = 0; i < config_.fftSize; ++i)
+    const auto fftSize = static_cast<size_t>(config_.fftSize);
+    for (size_t i = 0; i < fftSize; ++i)
     {
         fftOutputBuffer_[i] = complexBuffer_[i];
     }
@@ -303,7 +330,7 @@ void STFTProcessor::applyAnalysisWindow(float* data, int size) noexcept
     jassert(size == config_.fftSize);
     
     // Apply Hann window (using only first fftSize samples of fftSize+1 window)
-    analysisWindow_->multiplyWithWindowingTable(data, size);
+    analysisWindow_->multiplyWithWindowingTable(data, static_cast<size_t>(size));
     
     // No additional scaling needed for analysis (JUCE handles it)
 }
@@ -313,7 +340,7 @@ void STFTProcessor::applySynthesisWindow(float* data, int size) noexcept
     jassert(size == config_.fftSize);
     
     // Apply Hann window (using only first fftSize samples of fftSize+1 window)
-    synthesisWindow_->multiplyWithWindowingTable(data, size);
+    synthesisWindow_->multiplyWithWindowingTable(data, static_cast<size_t>(size));
     
     // Apply COLA correction scaling for proper reconstruction
     juce::FloatVectorOperations::multiply(data, synthesisScale_, size);

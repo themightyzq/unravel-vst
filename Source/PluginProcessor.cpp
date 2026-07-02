@@ -63,11 +63,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout UnravelAudioProcessor::creat
         false
     ));
 
-    // Tonal Gain: -60 to +12 dB (exactly as specified)
+    // Tonal Gain: -60 to +12 dB. Skew 1.71 puts -12 dB at half travel and
+    // unity (~0 dB) around 3/4, matching a mixing-fader taper — the linear
+    // taper wasted the bottom third of the knob on -60..-40 dB.
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         ParameterIDs::tonalGain,
         "Tonal Gain",
-        juce::NormalisableRange<float>(-60.0f, 12.0f, 0.1f, 1.0f),
+        juce::NormalisableRange<float>(-60.0f, 12.0f, 0.1f, 1.71f),
         0.0f, // Default: 0 dB (unity gain)
         "dB",
         juce::AudioProcessorParameter::genericParameter,
@@ -77,11 +79,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout UnravelAudioProcessor::creat
         }
     ));
     
-    // Noise Gain: -60 to +12 dB (exactly as specified)
+    // Noise Gain: -60 to +12 dB, fader taper (see Tonal Gain)
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         ParameterIDs::noisyGain,
         "Noise Gain",
-        juce::NormalisableRange<float>(-60.0f, 12.0f, 0.1f, 1.0f),
+        juce::NormalisableRange<float>(-60.0f, 12.0f, 0.1f, 1.71f),
         0.0f, // Default: 0 dB (unity gain)
         "dB",
         juce::AudioProcessorParameter::genericParameter,
@@ -91,11 +93,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout UnravelAudioProcessor::creat
         }
     ));
 
-    // Transient Gain: -60 to +12 dB (same range as the other two stream gains)
+    // Transient Gain: -60 to +12 dB, fader taper (see Tonal Gain)
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         ParameterIDs::transientGain,
         "Transient Gain",
-        juce::NormalisableRange<float>(-60.0f, 12.0f, 0.1f, 1.0f),
+        juce::NormalisableRange<float>(-60.0f, 12.0f, 0.1f, 1.71f),
         0.0f, // Default: 0 dB (unity gain — let transients through unchanged)
         "dB",
         juce::AudioProcessorParameter::genericParameter,
@@ -485,10 +487,10 @@ void UnravelAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
         if (channel >= static_cast<int>(channelProcessors.size()))
             continue;
             
-        auto& processor = *channelProcessors[channel];
+        auto& processor = *channelProcessors[static_cast<size_t>(channel)];
         const float* inputData = buffer.getReadPointer(channel);
         float* outputData = buffer.getWritePointer(channel);
-        
+
         // Process with HPSS using current gain values (updated in updateParameters).
         processor.processBlock(inputData, outputData,
                              numSamples,
@@ -497,28 +499,68 @@ void UnravelAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
                              currentTransientGain);
     }
 
-    // Publish the latest analysis frame for the UI (lock-free; no UI access to live buffers).
-    publishSpectrumSnapshot(isBypassed);
+    // Publish the latest analysis frame for the UI (lock-free; no UI access to
+    // live buffers). Gated on an actual new STFT frame (or a bypass-state
+    // change, so the display zeroes exactly once) — blocks smaller than the
+    // hop would otherwise republish the same frame 2-8x per hop.
+    const bool newAnalysisFrame = !channelProcessors.empty() && channelProcessors[0]
+                                  && channelProcessors[0]->consumeAnalysisFrameUpdate();
+    if (newAnalysisFrame || isBypassed != lastPublishedBypassed_)
+    {
+        publishSpectrumSnapshot(isBypassed);
+        lastPublishedBypassed_ = isBypassed;
+    }
 
     // Apply brightness filter (post-HPSS high shelf processing)
     if (brightnessParam_ != nullptr)
     {
         brightnessGainSmoother_.setTargetValue(brightnessParam_->load());
 
-        // Advance the 20ms smoother across this block and select the matching
-        // precomputed coefficient set. No allocation, no on/off threshold gating:
-        // a 0 dB high shelf is an identity filter, so always processing is transparent
-        // and avoids the click the old threshold produced.
-        const float smoothedBrightness = brightnessGainSmoother_.skip(numSamples);
-        const auto& coeffs = brightnessCoeffTable_[static_cast<size_t>(brightnessTableIndex(smoothedBrightness))];
+        // Select precomputed coefficient sets from the table — no allocation,
+        // no on/off threshold gating: a 0 dB high shelf is an identity filter,
+        // so always processing is transparent and avoids the click the old
+        // threshold produced.
+        const int numBrightnessChannels = juce::jmin(totalNumInputChannels, 2);
 
-        for (int channel = 0; channel < totalNumInputChannels && channel < 2; ++channel)
+        if (!brightnessGainSmoother_.isSmoothing())
         {
-            brightnessFilters_[channel].coefficients = coeffs;
-            auto* channelData = buffer.getWritePointer(channel);
+            // Steady state: one coefficient set for the whole block.
+            const auto& coeffs = brightnessCoeffTable_[static_cast<size_t>(brightnessTableIndex(brightnessGainSmoother_.getCurrentValue()))];
 
+            for (int channel = 0; channel < numBrightnessChannels; ++channel)
+            {
+                const auto ch = static_cast<size_t>(channel);
+                brightnessFilters_[ch].coefficients = coeffs;
+                auto* channelData = buffer.getWritePointer(channel);
+
+                for (int i = 0; i < numSamples; ++i)
+                    channelData[i] = brightnessFilters_[ch].processSample(channelData[i]);
+            }
+        }
+        else
+        {
+            // Ramping: advance the 20ms smoother per sample and swap the
+            // coefficient set at the exact sample where the table index
+            // changes. Table steps are ~0.1 dB, so each swap is inaudible —
+            // this removes the per-block staircase (zipper) under automation.
+            float* channelData[2] = { nullptr, nullptr };
+            for (int channel = 0; channel < numBrightnessChannels; ++channel)
+                channelData[channel] = buffer.getWritePointer(channel);
+
+            int currentIndex = -1;
             for (int i = 0; i < numSamples; ++i)
-                channelData[i] = brightnessFilters_[channel].processSample(channelData[i]);
+            {
+                const int index = brightnessTableIndex(brightnessGainSmoother_.getNextValue());
+                if (index != currentIndex)
+                {
+                    currentIndex = index;
+                    for (int channel = 0; channel < numBrightnessChannels; ++channel)
+                        brightnessFilters_[static_cast<size_t>(channel)].coefficients = brightnessCoeffTable_[static_cast<size_t>(index)];
+                }
+
+                for (int channel = 0; channel < numBrightnessChannels; ++channel)
+                    channelData[channel][i] = brightnessFilters_[static_cast<size_t>(channel)].processSample(channelData[channel][i]);
+            }
         }
     }
 }
@@ -554,7 +596,7 @@ void UnravelAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buff
             continue;
         }
 
-        auto& processor = *channelProcessors[channel];
+        auto& processor = *channelProcessors[static_cast<size_t>(channel)];
         const float* inputData  = buffer.getReadPointer(channel);
         float*       outputData = buffer.getWritePointer(channel);
         // Pass unity gains: HPSS's bypass path short-circuits to the delay
@@ -566,8 +608,13 @@ void UnravelAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buff
     // Do NOT drain snapRequested_ here — bypass overwrites smoother targets
     // with 1.0, so the snap is deferred to the first un-bypassed processBlock.
 
-    // Publish zero-valued snapshot so the UI reflects bypass state honestly.
-    publishSpectrumSnapshot(true);
+    // Publish zero-valued snapshot so the UI reflects bypass state honestly
+    // (once, on the transition into bypass — the zeros don't change after).
+    if (!lastPublishedBypassed_)
+    {
+        publishSpectrumSnapshot(true);
+        lastPublishedBypassed_ = true;
+    }
 }
 
 // Note: The HPSSProcessor provides a much simpler and more efficient interface

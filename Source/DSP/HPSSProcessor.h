@@ -50,7 +50,7 @@ class HPSSProcessor
 public:
     /**
      * Constructor with configurable quality settings.
-     * @param lowLatency If true, uses 1024/256 config (~15ms), else 2048/512 (~32ms)
+     * @param lowLatency If true, uses 1024/256 config (~21ms), else 2048/512 (~43ms)
      */
     explicit HPSSProcessor(bool lowLatency = true);
     
@@ -244,6 +244,18 @@ public:
      */
     juce::Span<const float> getCurrentTransientMask() const noexcept;
 
+    /**
+     * True if at least one new analysis frame was produced since the last
+     * call; clears the flag. Lets the host publish visualization snapshots
+     * per STFT hop instead of per audio block.
+     */
+    bool consumeAnalysisFrameUpdate() noexcept
+    {
+        const bool updated = analysisFrameUpdated_;
+        analysisFrameUpdated_ = false;
+        return updated;
+    }
+
 private:
     // === Core Components ===
     std::unique_ptr<STFTProcessor> stftProcessor_;      ///< STFT analysis/synthesis
@@ -255,6 +267,7 @@ private:
     bool bypassEnabled_ = false;                        ///< Bypass mode flag
     bool safetyLimitingEnabled_ = true;                 ///< Safety limiting flag
     bool isInitialized_ = false;                        ///< Initialization state
+    bool analysisFrameUpdated_ = false;                 ///< New analysis frame since last consume
 
     // === Separation Parameters ===
     float separation_ = 0.75f;                          ///< Separation amount (0-1)
@@ -278,8 +291,7 @@ private:
     std::vector<float> bypassBuffer_;                   ///< Delay buffer for bypass
     
     // === Bypass Implementation ===
-    int bypassWritePos_ = 0;                           ///< Bypass buffer write position
-    int bypassReadPos_ = 0;                            ///< Bypass buffer read position
+    int bypassWritePos_ = 0;                           ///< Delay-line write position (reads are offset from it)
     
     // === Safety Limiting ===
     static constexpr float kSafetyThreshold = 0.891f;  ///< -1dB in linear scale (earlier catch)
@@ -288,6 +300,7 @@ private:
     
     // === Numerical Constants ===
     static constexpr float kEpsilon = 1e-8f;           ///< Minimum value for stability
+    static constexpr float kUnityEpsilon = 1e-4f;      ///< Unity-gain detection window (±0.001 dB)
     
     // === Private Methods ===
     
@@ -336,23 +349,23 @@ private:
     }
     
     /**
-     * Process bypass mode with matched latency.
-     * @param inputBuffer Input samples
-     * @param outputBuffer Output samples  
-     * @param numSamples Number of samples
+     * Write input into the latency-matched delay line. Called every block
+     * (regardless of the output path) so the line's history is always real.
      */
-    void processBypass(const float* inputBuffer, float* outputBuffer, int numSamples) noexcept;
-    
+    void writeDelayLine(const float* inputBuffer, int numSamples) noexcept;
+
     /**
-     * Apply unity gain transparency optimization.
-     * When all three stream gains are 1.0, this provides bit-perfect passthrough
-     * (the three mass-conserving masks sum to 1, so unity-scaled they reconstruct
-     * the input exactly).
-     * @return True if unity gain path was used
+     * Read latency-delayed samples from the delay line. Used by bypass and by
+     * the unity-gain passthrough for bit-perfect output.
      */
-    bool tryUnityGainPath(const float* inputBuffer, float* outputBuffer,
-                         int numSamples,
-                         float tonalGain, float noiseGain, float transientGain) noexcept;
+    void readDelayLine(float* outputBuffer, int numSamples) noexcept;
+
+    /**
+     * True when all three stream gains — targets and smoothers — are settled
+     * at unity, i.e. the mass-conserving masks would reconstruct the input
+     * exactly and the delay line can supply bit-perfect output instead.
+     */
+    bool isUnitySettled(float tonalGain, float noiseGain, float transientGain) const noexcept;
     
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(HPSSProcessor)
 };

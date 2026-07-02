@@ -683,6 +683,211 @@ bool checkLowFreqTracker()
 }
 } // namespace
 
+// -------------------------------------------------------------------------
+// Reported-latency truth check, swept across host block sizes: a unit
+// impulse through the full STFT path (gains fractionally off unity so the
+// passthrough can't engage) must peak exactly getLatencyInSamples() after it
+// went in — that's the figure the host uses for PDC and the delay the
+// unity/bypass line is matched to. The realised latency must be IDENTICAL at
+// every block size (it used to be fftSize - blockSize: sub-hop blocks landed
+// late vs PDC). A steady sine is also scanned for mid-stream zero-fill
+// dropouts, which non-hop-divisor block sizes (e.g. 333, or REAPER's
+// variable blocks) used to trigger via output-ring underflow.
+// -------------------------------------------------------------------------
+bool checkReportedLatency()
+{
+    std::printf ("\n=== REPORTED LATENCY vs MEASURED (per block size) ===\n");
+
+    // Off-unity so the unity passthrough can't engage and we measure the real
+    // STFT path. 1.001 (+0.0087 dB) is 10x any plausible unity-detection
+    // epsilon (currently 1e-4) while leaving amplitudes ~unchanged.
+    const float g = 1.001f;
+    const int blockSizes[] = { 64, 128, 256, 333, 512, 1024 };
+
+    bool allOk = true;
+
+    for (int blockSize : blockSizes)
+    {
+        // --- Impulse latency ---
+        HPSSProcessor proc (false);
+        proc.prepare (kSR, blockSize);
+        proc.setSeparation (0.85f);
+        proc.setFocus (0.0f);
+        proc.setSpectralFloor (0.0f);
+
+        const int reported = proc.getLatencyInSamples();
+
+        std::vector<float> in ((size_t) blockSize, 0.0f), out ((size_t) blockSize, 0.0f);
+        std::vector<float> captured;
+
+        const size_t impulseAt = 20480;               // sample position, well past warmup
+        const size_t totalSamples = impulseAt + 4096;
+
+        size_t fed = 0;
+        while (fed < totalSamples)
+        {
+            std::fill (in.begin(), in.end(), 0.0f);
+            for (int i = 0; i < blockSize; ++i)
+                if (fed + (size_t) i == impulseAt)
+                    in[(size_t) i] = 1.0f;
+
+            proc.processBlock (in.data(), out.data(), blockSize, g, g, g);
+            captured.insert (captured.end(), out.begin(), out.end());
+            fed += (size_t) blockSize;
+        }
+
+        size_t peakAt = impulseAt;
+        double peak = 0.0;
+        for (size_t n = impulseAt; n < captured.size(); ++n)
+        {
+            const double v = std::abs ((double) captured[n]);
+            if (v > peak) { peak = v; peakAt = n; }
+        }
+        const long measured = (long) peakAt - (long) impulseAt;
+        const bool latencyOk = (measured == (long) reported);
+
+        // --- Dropout scan: steady sine, look for zero-fill holes mid-stream ---
+        HPSSProcessor proc2 (false);
+        proc2.prepare (kSR, blockSize);
+        proc2.setSeparation (0.85f);
+        proc2.setFocus (0.0f);
+        proc2.setSpectralFloor (0.0f);
+
+        std::vector<float> sine ((size_t) kBlock * 8);
+        genSine (sine, seamlessFreq (440.0, (int) sine.size()), 0.5f);
+
+        std::vector<float> sineOut;
+        size_t readPos = 0;
+        while (sineOut.size() < (size_t) kSR)         // ~1 s
+        {
+            for (int i = 0; i < blockSize; ++i)
+            {
+                in[(size_t) i] = sine[readPos % sine.size()];
+                ++readPos;
+            }
+            proc2.processBlock (in.data(), out.data(), blockSize, g, g, g);
+            sineOut.insert (sineOut.end(), out.begin(), out.end());
+        }
+
+        // After latency + settle, no 1 ms window may be more than 6 dB below
+        // the overall post-settle RMS (an underflow zero-fill hole is ~-inf).
+        const size_t settle = (size_t) reported + 4096;
+        double totalSq = 0.0;
+        for (size_t n = settle; n < sineOut.size(); ++n)
+            totalSq += (double) sineOut[n] * sineOut[n];
+        const double refRms = std::sqrt (totalSq / (double) (sineOut.size() - settle));
+
+        const size_t win = (size_t) (kSR / 1000.0);   // 1 ms
+        double minWinRms = 1e9;
+        for (size_t start = settle; start + win <= sineOut.size(); start += win / 2)
+        {
+            double sq = 0.0;
+            for (size_t n = start; n < start + win; ++n)
+                sq += (double) sineOut[n] * sineOut[n];
+            minWinRms = std::min (minWinRms, std::sqrt (sq / (double) win));
+        }
+        const double dipDb = 20.0 * std::log10 (std::max (minWinRms, 1e-12) / std::max (refRms, 1e-12));
+        const bool dropoutOk = dipDb >= -6.0;
+
+        std::printf ("  [%s] block %4d: reported %d, measured %ld, peak %+.4f | dropout scan min window %+.2f dB\n",
+                     (latencyOk && dropoutOk) ? "PASS" : "FAIL",
+                     blockSize, reported, measured, (double) captured[peakAt], dipDb);
+
+        allOk = allOk && latencyOk && dropoutOk;
+    }
+
+    return allOk;
+}
+
+// -------------------------------------------------------------------------
+// Unity -> non-unity transition continuity (C6 regression test).
+// One long-lived processor plays a steady sine: first at unity gains (the
+// bit-perfect passthrough path), then switched to tonal-only gains. Because
+// the STFT pipeline must stay fed during the unity passthrough, the switch
+// has to be click-free and dropout-free:
+//   - continuity: the largest sample-to-sample step across and after the
+//     switch stays comparable to the sine's own steady-state step
+//   - no dropout: the quietest 10 ms window after the switch stays within
+//     6 dB of the unity-region RMS (a starved STFT ring would give ~-40 dB+)
+// -------------------------------------------------------------------------
+bool checkUnityTransition()
+{
+    std::printf ("\n=== UNITY->ACTIVE TRANSITION (C6) ===\n");
+
+    std::vector<float> sine (kBlock * 8);
+    genSine (sine, seamlessFreq (440.0, (int) sine.size()), 0.5f);
+
+    HPSSProcessor proc (false);
+    proc.prepare (kSR, kBlock);
+    proc.setSeparation (0.85f);
+    proc.setFocus (0.0f);
+    proc.setSpectralFloor (0.0f);
+
+    std::vector<float> in (kBlock, 0.0f), out (kBlock, 0.0f);
+    size_t readPos = 0;
+
+    auto runBlocks = [&] (int numBlocks, float tg, float ng, float trg, std::vector<float>* capture)
+    {
+        for (int b = 0; b < numBlocks; ++b)
+        {
+            for (int i = 0; i < kBlock; ++i)
+            {
+                in[(size_t) i] = sine[readPos % sine.size()];
+                ++readPos;
+            }
+            proc.processBlock (in.data(), out.data(), kBlock, tg, ng, trg);
+            if (capture != nullptr)
+                capture->insert (capture->end(), out.begin(), out.end());
+        }
+    };
+
+    // ~1 s at unity: warms up the pipeline and settles the smoothers, then
+    // captures a reference window still on the unity passthrough.
+    std::vector<float> pre, post;
+    runBlocks (88, 1.0f, 1.0f, 1.0f, nullptr);
+    runBlocks (8,  1.0f, 1.0f, 1.0f, &pre);
+
+    // Switch to tonal-only (the sine lives in the tonal stream, so the level
+    // must hold) and capture ~0.75 s across the transition.
+    runBlocks (70, 1.0f, 0.0f, 0.0f, &post);
+
+    // Metric 1: sample-to-sample continuity across the seam and beyond.
+    double maxStepPre = 0.0;
+    for (size_t n = 1; n < pre.size(); ++n)
+        maxStepPre = std::max (maxStepPre, (double) std::abs (pre[n] - pre[n - 1]));
+
+    double maxStepPost = std::abs ((double) post[0] - (double) pre.back());
+    for (size_t n = 1; n < post.size(); ++n)
+        maxStepPost = std::max (maxStepPost, (double) std::abs (post[n] - post[n - 1]));
+
+    const double stepRatio = maxStepPost / std::max (maxStepPre, 1e-12);
+
+    // Metric 2: quietest 10 ms RMS window after the switch vs unity RMS.
+    const size_t win = (size_t) (kSR / 100.0); // 10 ms
+    double preSq = 0.0;
+    for (float v : pre) preSq += (double) v * v;
+    const double preRms = std::sqrt (preSq / (double) pre.size());
+
+    double minWinRms = 1e9;
+    for (size_t start = 0; start + win <= post.size(); start += win / 2)
+    {
+        double sq = 0.0;
+        for (size_t n = start; n < start + win; ++n) sq += (double) post[n] * post[n];
+        minWinRms = std::min (minWinRms, std::sqrt (sq / (double) win));
+    }
+    const double dipDb = 20.0 * std::log10 (std::max (minWinRms, 1e-12) / std::max (preRms, 1e-12));
+
+    const bool stepOk = stepRatio <= 3.0;
+    const bool dipOk  = dipDb >= -6.0;
+
+    std::printf ("  [%s] transition continuity: maxStep post/pre = %.2fx (want <= 3x)\n",
+                 stepOk ? "PASS" : "FAIL", stepRatio);
+    std::printf ("  [%s] no dropout after unity exit: min 10ms window %.2f dB vs unity (want >= -6 dB)\n",
+                 dipOk ? "PASS" : "FAIL", dipDb);
+
+    return stepOk && dipOk;
+}
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI juceInit; // for message-thread-free JUCE bits
@@ -719,6 +924,8 @@ int main()
     targetsOk &= checkComputeMasksWithTonal();
     targetsOk &= checkAnalysisOnlyMagnitude();
     targetsOk &= checkLowFreqTracker();
+    targetsOk &= checkReportedLatency();
+    targetsOk &= checkUnityTransition();
     targetsOk &= checkIsolationTargets (85.0f);
     targetsOk &= checkIsolationTargets (100.0f);
 

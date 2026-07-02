@@ -171,7 +171,7 @@ float MagPhaseFrame::calculateEnergy() const noexcept
     // Use JUCE's efficient sum-of-squares calculation
     for (int i = 0; i < numBins; ++i)
     {
-        const float mag = magnitudeData_[i];
+        const float mag = magnitudeData_[static_cast<size_t>(i)];
         energy += mag * mag;
     }
     

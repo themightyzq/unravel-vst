@@ -35,18 +35,17 @@ void HPSSProcessor::prepare(double sampleRate, int maxBlockSize) noexcept
     initializeComponents();
     
     // Prepare processing buffers
-    tonalMaskBuffer_.resize(numBins_, 0.0f);
-    noiseMaskBuffer_.resize(numBins_, 0.0f);
-    transientMaskBuffer_.resize(numBins_, 0.0f);
+    tonalMaskBuffer_.resize(static_cast<size_t>(numBins_), 0.0f);
+    noiseMaskBuffer_.resize(static_cast<size_t>(numBins_), 0.0f);
+    transientMaskBuffer_.resize(static_cast<size_t>(numBins_), 0.0f);
 
-    // Prepare bypass buffer with latency compensation
-    // Write position starts ahead of read position by latency amount
-    // This creates the proper delay for bypass mode
-    const int latencyInSamples = getLatencyInSamples();
-    bypassBuffer_.resize(latencyInSamples + maxBlockSize, 0.0f);
-    bypassWritePos_ = latencyInSamples;  // Write ahead by latency
-    bypassReadPos_ = 0;                   // Read from beginning (zeros = initial silence)
-    
+    // Prepare the latency-matched delay line. Reads happen at a fixed offset
+    // behind the write pointer (see readDelayLine), so the buffer only needs
+    // to hold latency + one block, and a zeroed buffer yields the correct
+    // initial silence.
+    bypassBuffer_.resize(static_cast<size_t>(getLatencyInSamples() + maxBlockSize), 0.0f);
+    bypassWritePos_ = 0;
+
     isInitialized_ = true;
 }
 
@@ -74,11 +73,8 @@ void HPSSProcessor::reset() noexcept
     std::fill(noiseMaskBuffer_.begin(), noiseMaskBuffer_.end(), 0.0f);
     std::fill(transientMaskBuffer_.begin(), transientMaskBuffer_.end(), 0.0f);
     std::fill(bypassBuffer_.begin(), bypassBuffer_.end(), 0.0f);
-
-    // Maintain proper bypass delay offset
-    const int latencyInSamples = getLatencyInSamples();
-    bypassWritePos_ = latencyInSamples;
-    bypassReadPos_ = 0;
+    bypassWritePos_ = 0;
+    analysisFrameUpdated_ = false;
 }
 
 void HPSSProcessor::processBlock(const float* inputBuffer,
@@ -93,18 +89,25 @@ void HPSSProcessor::processBlock(const float* inputBuffer,
     jassert(outputBuffer != nullptr);
     jassert(numSamples > 0 && numSamples <= currentBlockSize_);
 
+    // Always feed the latency-matched delay line, whatever path produces the
+    // output. This keeps its history real, so entering bypass (or the unity
+    // passthrough below) reads actual delayed input instead of stale samples
+    // left over from the last time the line was used.
+    writeDelayLine(inputBuffer, numSamples);
+
     // Handle bypass mode
     if (bypassEnabled_)
     {
-        processBypass(inputBuffer, outputBuffer, numSamples);
+        readDelayLine(outputBuffer, numSamples);
         return;
     }
 
-    // Check for unity gain optimization (all three streams at unity = transparent passthrough)
-    if (tryUnityGainPath(inputBuffer, outputBuffer, numSamples, tonalGain, noiseGain, transientGain))
-    {
-        return;
-    }
+    // All three streams at unity (targets and smoothers settled)? The STFT
+    // pipeline below still runs — that keeps the analysis/synthesis rings and
+    // the mask-estimator statistics warm (no click when a gain leaves unity)
+    // and keeps the spectrum display live — but the audible output is taken
+    // from the bit-perfect delay line instead of the reconstruction.
+    const bool unityPassthrough = isUnitySettled(tonalGain, noiseGain, transientGain);
 
     // Update parameter smoothing
     updateParameterSmoothing(tonalGain, noiseGain, transientGain);
@@ -154,10 +157,11 @@ void HPSSProcessor::processBlock(const float* inputBuffer,
         // Apply masks to magnitudes — sum the three gained streams.
         for (int bin = 0; bin < numBins_; ++bin)
         {
-            const float originalMag = magnitudes[bin];
-            magnitudes[bin] = originalMag * (tonalMaskBuffer_[bin]     * currentTonalGain
-                                           + transientMaskBuffer_[bin] * currentTransientGain
-                                           + noiseMaskBuffer_[bin]     * currentNoiseGain);
+            const auto b = static_cast<size_t>(bin);
+            const float originalMag = magnitudes[b];
+            magnitudes[b] = originalMag * (tonalMaskBuffer_[b]     * currentTonalGain
+                                         + transientMaskBuffer_[b] * currentTransientGain
+                                         + noiseMaskBuffer_[b]     * currentNoiseGain);
         }
 
         // Convert back to complex representation
@@ -166,6 +170,9 @@ void HPSSProcessor::processBlock(const float* inputBuffer,
         // Set the processed frame back to STFT processor
         stftProcessor_->setCurrentFrame(complexFrame);
 
+        // Flag a fresh analysis frame for the visualization snapshot
+        analysisFrameUpdated_ = true;
+
         // Try to trigger another frame from buffered input
         // This is safe because pushAndProcess checks getReadableDistance >= fftSize
         stftProcessor_->pushAndProcess(nullptr, 0);
@@ -173,11 +180,21 @@ void HPSSProcessor::processBlock(const float* inputBuffer,
 
     // 3. Extract output samples from STFT processor
     stftProcessor_->processOutput(outputBuffer, numSamples);
-    
-    // 4. Apply safety limiting
+
+    // 4a. Unity passthrough: overwrite the (near-identical, ~-146 dB error)
+    // reconstruction with the bit-perfect delayed input. Both paths carry the
+    // same latency and the pipeline above stayed fed, so switching between
+    // them is sample-aligned and click-free.
+    if (unityPassthrough)
+    {
+        readDelayLine(outputBuffer, numSamples);
+        return;
+    }
+
+    // 4b. Apply safety limiting
     if (safetyLimitingEnabled_)
         applySafetyLimiting(outputBuffer, numSamples);
-    
+
     // Denormal flushing is handled at the hardware level by the host processor's
     // juce::ScopedNoDenormals (FTZ/DAZ); no manual per-sample flush needed.
 }
@@ -289,8 +306,8 @@ void HPSSProcessor::initializeComponents() noexcept
 {
     // Choose STFT configuration based on quality mode
     STFTProcessor::Config stftConfig = useHighQuality_
-        ? STFTProcessor::Config::highQuality()    // 2048/512 - ~32ms latency
-        : STFTProcessor::Config::lowLatency();    // 1024/256 - ~15ms latency
+        ? STFTProcessor::Config::highQuality()    // 2048/512 - ~43ms latency (fftSize)
+        : STFTProcessor::Config::lowLatency();    // 1024/256 - ~21ms latency (fftSize)
 
     // Create STFT processor
     stftProcessor_ = std::make_unique<STFTProcessor>(stftConfig);
@@ -311,16 +328,14 @@ void HPSSProcessor::initializeComponents() noexcept
     maskEstimator_->setFocus(focus_);
 
     // Resize mask buffers for new bin count (critical when switching quality modes)
-    tonalMaskBuffer_.resize(numBins_, 0.0f);
-    noiseMaskBuffer_.resize(numBins_, 0.0f);
-    transientMaskBuffer_.resize(numBins_, 0.0f);
+    tonalMaskBuffer_.resize(static_cast<size_t>(numBins_), 0.0f);
+    noiseMaskBuffer_.resize(static_cast<size_t>(numBins_), 0.0f);
+    transientMaskBuffer_.resize(static_cast<size_t>(numBins_), 0.0f);
 
-    // Resize and reinitialize bypass buffer for new latency
-    const int latencyInSamples = getLatencyInSamples();
-    bypassBuffer_.resize(latencyInSamples + currentBlockSize_, 0.0f);
+    // Resize and reinitialize the delay line for the new latency
+    bypassBuffer_.resize(static_cast<size_t>(getLatencyInSamples() + currentBlockSize_), 0.0f);
     std::fill(bypassBuffer_.begin(), bypassBuffer_.end(), 0.0f);
-    bypassWritePos_ = latencyInSamples;
-    bypassReadPos_ = 0;
+    bypassWritePos_ = 0;
 }
 
 void HPSSProcessor::updateParameterSmoothing(float tonalGain, float noiseGain, float transientGain) noexcept
@@ -350,31 +365,46 @@ void HPSSProcessor::applySafetyLimiting(float* buffer, int numSamples) noexcept
     }
 }
 
-void HPSSProcessor::processBypass(const float* inputBuffer, float* outputBuffer, int numSamples) noexcept
+void HPSSProcessor::writeDelayLine(const float* inputBuffer, int numSamples) noexcept
 {
-    const int latency = getLatencyInSamples();
     const int bufferSize = static_cast<int>(bypassBuffer_.size());
-    
-    // Write input to delay buffer
+
     for (int i = 0; i < numSamples; ++i)
     {
-        bypassBuffer_[bypassWritePos_] = inputBuffer[i];
+        bypassBuffer_[static_cast<size_t>(bypassWritePos_)] = inputBuffer[i];
         bypassWritePos_ = (bypassWritePos_ + 1) % bufferSize;
-    }
-    
-    // Read delayed output
-    for (int i = 0; i < numSamples; ++i)
-    {
-        outputBuffer[i] = bypassBuffer_[bypassReadPos_];
-        bypassReadPos_ = (bypassReadPos_ + 1) % bufferSize;
     }
 }
 
-bool HPSSProcessor::tryUnityGainPath(const float* inputBuffer, float* outputBuffer,
-                                    int numSamples,
-                                    float tonalGain, float noiseGain, float transientGain) noexcept
+void HPSSProcessor::readDelayLine(float* outputBuffer, int numSamples) noexcept
 {
-    auto nearUnity = [](float v) noexcept { return std::abs(v - 1.0f) < kEpsilon; };
+    // Read at a fixed offset behind the write pointer rather than from an
+    // independently-advancing read pointer: the delay is then structurally
+    // exactly getLatencyInSamples() no matter which blocks called us, so the
+    // delay line can never drift out of alignment with the STFT path.
+    // Requires bufferSize >= numSamples + latency (guaranteed by prepare(),
+    // which sizes it to latency + maxBlockSize).
+    const int bufferSize = static_cast<int>(bypassBuffer_.size());
+    const int latency = getLatencyInSamples();
+
+    int readPos = bypassWritePos_ - latency - numSamples;
+    readPos = ((readPos % bufferSize) + bufferSize) % bufferSize;
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        outputBuffer[i] = bypassBuffer_[static_cast<size_t>(readPos)];
+        readPos = (readPos + 1) % bufferSize;
+    }
+}
+
+bool HPSSProcessor::isUnitySettled(float tonalGain, float noiseGain, float transientGain) const noexcept
+{
+    // kUnityEpsilon is deliberately loose (±1e-4 ≈ ±0.001 dB, far below
+    // audibility): the old 1e-8 threshold was fragile against smoother
+    // rounding. Since the STFT pipeline keeps running during the unity
+    // passthrough, flickering across this threshold mid-ramp switches between
+    // two latency-matched, near-identical outputs — inaudible either way.
+    auto nearUnity = [](float v) noexcept { return std::abs(v - 1.0f) < kUnityEpsilon; };
 
     // All three target gains at unity? (Masks are mass-conserving so unity on
     // all three reconstructs the input exactly.)
@@ -382,14 +412,9 @@ bool HPSSProcessor::tryUnityGainPath(const float* inputBuffer, float* outputBuff
         return false;
 
     // And all three smoothers settled at unity (target and current)?
-    if (! (nearUnity(tonalGainSmoother_.getCurrentValue())     && nearUnity(tonalGainSmoother_.getTargetValue())
+    return nearUnity(tonalGainSmoother_.getCurrentValue())     && nearUnity(tonalGainSmoother_.getTargetValue())
         && nearUnity(noiseGainSmoother_.getCurrentValue())     && nearUnity(noiseGainSmoother_.getTargetValue())
-        && nearUnity(transientGainSmoother_.getCurrentValue()) && nearUnity(transientGainSmoother_.getTargetValue())))
-        return false;
-
-    // Bit-perfect passthrough with matched latency.
-    processBypass(inputBuffer, outputBuffer, numSamples);
-    return true;
+        && nearUnity(transientGainSmoother_.getCurrentValue()) && nearUnity(transientGainSmoother_.getTargetValue());
 }
 
 

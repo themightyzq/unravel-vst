@@ -20,12 +20,11 @@ public:
 
     // Host bypass virtual. JUCE's default zeros output channels beyond the
     // input count and does NOT route through any compensating delay. With
-    // ~32 ms of reported PDC latency (fftSize - hopSize = 1536 samples), the
-    // default would put the bypassed track 1536 samples early relative to
-    // parallel routes, breaking phase alignment. Route through the in-plugin
-    // bypass path (HPSSProcessor::processBypass) so the delay buffer keeps
-    // the bypassed signal aligned with what other plugins on parallel sends
-    // produce. See REVIEW-AUDIO.md C3.
+    // ~43 ms of reported PDC latency (fftSize = 2048 samples), the default
+    // would put the bypassed track 2048 samples early relative to parallel
+    // routes, breaking phase alignment. Route through the in-plugin
+    // latency-matched delay line so the bypassed signal stays aligned with
+    // what other plugins on parallel sends produce. See REVIEW-AUDIO.md C3.
     void processBlockBypassed (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
 
     juce::AudioProcessorEditor* createEditor() override;
@@ -146,6 +145,7 @@ private:
     std::vector<float> snapTransientMask_;
     std::vector<float> snapNoiseMask_;
     std::atomic<uint32_t> snapSeq_ { 0 };
+    bool lastPublishedBypassed_ = false;   // audio thread only: gates the one-shot bypass publish
     void publishSpectrumSnapshot(bool bypassed) noexcept;
 
 public:

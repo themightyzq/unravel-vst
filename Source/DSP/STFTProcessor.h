@@ -15,7 +15,7 @@
  * 
  * Key Features:
  * - Real-time safe: No heap allocations in processBlock
- * - Low latency: ~32ms at 48kHz (2048/512) or ~15ms with 1024/256 configuration
+ * - Latency: ~43ms at 48kHz (2048/512) — a full fftSize, block-size invariant
  * - Phase-coherent processing with proper COLA scaling
  * - Thread-safe design (no locks needed in audio thread)
  * - Efficient memory layout optimized for modern CPUs
@@ -26,7 +26,7 @@
  * - Default Hop Size: 512 samples (25% overlap, 75% hop)
  * - Window: Hann with proper COLA scaling
  * - Frequency bins: 1025 (for real FFT)
- * - Latency: fftSize - hopSize samples
+ * - Latency: fftSize samples (see Config::getLatencyInSamples)
  */
 class STFTProcessor
 {
@@ -50,7 +50,7 @@ public:
         // Default high-quality configuration  
         static Config highQuality() noexcept 
         { 
-            return {2048, 512}; // ~32ms latency at 48kHz
+            return {2048, 512}; // ~43ms latency at 48kHz (fftSize)
         }
         
         // Validate configuration
@@ -64,7 +64,18 @@ public:
         }
         
         int getNumBins() const noexcept { return fftSize / 2 + 1; }
-        int getLatencyInSamples() const noexcept { return fftSize - hopSize; }
+
+        // Reported latency is a full fftSize, NOT fftSize - hopSize: output is
+        // produced in hop-sized bursts only after a complete analysis window,
+        // so the smallest constant delay that never underflows for an
+        // arbitrary host block size (including odd/variable sizes, e.g.
+        // REAPER's anticipative FX) is fftSize. The output ring is primed with
+        // exactly this many zeros in prepare()/reset(), making the realised
+        // latency block-size invariant and equal to this figure. (The old
+        // fftSize - hopSize figure was only realised when the host block was
+        // a multiple of hopSize; smaller blocks arrived late vs PDC and
+        // non-divisor blocks glitched.)
+        int getLatencyInSamples() const noexcept { return fftSize; }
     };
 
     /**
@@ -147,7 +158,7 @@ public:
 
     /**
      * Get the processing latency in samples.
-     * @return Latency in samples (fftSize - hopSize)
+     * @return Latency in samples (fftSize; block-size invariant)
      */
     int getLatencyInSamples() const noexcept { return config_.getLatencyInSamples(); }
 
@@ -192,9 +203,9 @@ private:
     class RingBuffer
     {
     public:
-        void resize(int size) 
+        void resize(int size)
         {
-            data_.resize(size * 2, 0.0f); // Double size to avoid modulo operations
+            data_.resize(static_cast<size_t>(size * 2), 0.0f); // Double size to avoid modulo operations
             size_ = size;
             writePos_ = 0;
             readPos_ = 0;
@@ -204,8 +215,8 @@ private:
         {
             for (int i = 0; i < numSamples; ++i)
             {
-                data_[writePos_] = input[i];
-                data_[writePos_ + size_] = input[i]; // Mirror for efficient reading
+                data_[static_cast<size_t>(writePos_)] = input[i];
+                data_[static_cast<size_t>(writePos_ + size_)] = input[i]; // Mirror for efficient reading
                 writePos_ = (writePos_ + 1) % size_;
             }
         }
@@ -223,10 +234,10 @@ private:
             // Read data and then clear it - used for output buffer
             for (int i = 0; i < numSamples; ++i)
             {
-                const int pos = (readPos_ + i) % size_;
+                const auto pos = static_cast<size_t>((readPos_ + i) % size_);
                 output[i] = data_[pos];
                 data_[pos] = 0.0f;
-                data_[pos + size_] = 0.0f; // Clear mirror too
+                data_[pos + static_cast<size_t>(size_)] = 0.0f; // Clear mirror too
             }
         }
         
@@ -241,9 +252,9 @@ private:
             // This is critical for STFT reconstruction
             for (int i = 0; i < numSamples; ++i)
             {
-                const int pos = (writePos_ + i) % size_;
+                const auto pos = static_cast<size_t>((writePos_ + i) % size_);
                 data_[pos] += input[i];
-                data_[pos + size_] = data_[pos]; // Keep mirror in sync
+                data_[pos + static_cast<size_t>(size_)] = data_[pos]; // Keep mirror in sync
             }
         }
         
@@ -277,6 +288,13 @@ private:
         int readPos_ = 0;
     };
     
+    /**
+     * Prime the output ring with getLatencyInSamples() zeros so realised
+     * latency is block-size invariant and extraction can never underflow.
+     * Called from prepare() and reset() after the buffers are cleared.
+     */
+    void primeOutputLatency() noexcept;
+
     // Ring buffers for input and output
     RingBuffer inputBuffer_;
     RingBuffer outputBuffer_;

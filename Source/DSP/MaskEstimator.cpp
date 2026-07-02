@@ -7,42 +7,44 @@ MaskEstimator::MaskEstimator() = default;
 
 MaskEstimator::~MaskEstimator() = default;
 
-void MaskEstimator::prepare(int numBins, double sampleRate) noexcept
+void MaskEstimator::prepare(int newNumBins, double newSampleRate) noexcept
 {
-    jassert(numBins > 0);
-    jassert(sampleRate > 0.0);
-    
-    this->numBins = numBins;
-    this->sampleRate = sampleRate;
-    
+    jassert(newNumBins > 0);
+    jassert(newSampleRate > 0.0);
+
+    this->numBins = newNumBins;
+    this->sampleRate = newSampleRate;
+
+    const auto binCount = static_cast<size_t>(newNumBins);
+
     // Allocate HPSS guide signals
-    horizontalGuide.resize(numBins, 0.0f);
-    verticalGuide.resize(numBins, 0.0f);
-    
+    horizontalGuide.resize(binCount, 0.0f);
+    verticalGuide.resize(binCount, 0.0f);
+
     // Allocate spectral statistics
-    spectralFlux.resize(numBins, 0.0f);
-    spectralFlatness.resize(numBins, 0.0f);
-    
+    spectralFlux.resize(binCount, 0.0f);
+    spectralFlatness.resize(binCount, 0.0f);
+
     // Allocate processing buffers
-    hpssMask.resize(numBins, 0.0f);
-    fluxMask.resize(numBins, 0.0f);
-    flatnessMask.resize(numBins, 0.0f);
-    combinedMask.resize(numBins, 0.0f);
-    smoothedMask.resize(numBins, 0.0f);
-    tempBuffer.resize(std::max(numBins, horizontalMedianSize), 0.0f);
-    
+    hpssMask.resize(binCount, 0.0f);
+    fluxMask.resize(binCount, 0.0f);
+    flatnessMask.resize(binCount, 0.0f);
+    combinedMask.resize(binCount, 0.0f);
+    smoothedMask.resize(binCount, 0.0f);
+    tempBuffer.resize(static_cast<size_t>(std::max(newNumBins, horizontalMedianSize)), 0.0f);
+
     // Initialize previous frame data
-    previousMagnitudes.resize(numBins, 0.0f);
-    previousSmoothedMask.resize(numBins, 0.5f); // Start with neutral masks
-    transientEnv.resize(numBins, 0.0f);
-    
+    previousMagnitudes.resize(binCount, 0.0f);
+    previousSmoothedMask.resize(binCount, 0.5f); // Start with neutral masks
+    transientEnv.resize(binCount, 0.0f);
+
     // Initialize magnitude history (fixed ring buffer for horizontal median)
     // Pre-allocate all memory once - NO allocations during processing
-    magnitudeHistoryData.resize(horizontalMedianSize * numBins, 0.0f);
+    magnitudeHistoryData.resize(static_cast<size_t>(horizontalMedianSize * newNumBins), 0.0f);
     historyWriteIndex = 0;
     framesReceived = 0;  // Start with no valid frames
 
-    lowFreqTracker.prepare(numBins, sampleRate);
+    lowFreqTracker.prepare(newNumBins, newSampleRate);
 
     isInitialized = true;
 }
@@ -142,7 +144,7 @@ void MaskEstimator::computeMasks(juce::Span<float> tonalMask,
     const float maskExponent = 0.3f + t * (2.0f + t * 2.7f);
 
     // Compute Wiener-style masks with spectral feature enhancement
-    for (int i = 0; i < numBins; ++i)
+    for (size_t i = 0; i < static_cast<size_t>(numBins); ++i)
     {
         // Power estimates from HPSS guides (squared for power domain)
         float tonalPower = horizontalGuide[i] * horizontalGuide[i];
@@ -249,7 +251,7 @@ void MaskEstimator::computeMasksWithTonal(juce::Span<const float> externalTonalM
     // controls keep working. The transient envelope still uses spectralFlux,
     // which the caller is expected to have populated via updateGuides()/
     // updateStats() on THIS grid before calling.
-    for (int i = 0; i < numBins; ++i)
+    for (size_t i = 0; i < static_cast<size_t>(numBins); ++i)
         combinedMask[i] = clamp01(externalTonalMask[i]);
 
     // Same temporal smoothing as the normal path.
@@ -302,7 +304,7 @@ void MaskEstimator::finalizeMasksFromSmoothed(juce::Span<float> tonalMask,
     // Onsets immediately push transientness toward 1 (fast attack) so a short
     // broadband event flows to the Transient stream; as the event sustains the
     // envelope decays (slow release) and the energy moves back into Noise.
-    for (int i = 0; i < numBins; ++i)
+    for (size_t i = 0; i < static_cast<size_t>(numBins); ++i)
     {
         const float flux = clamp01(spectralFlux[i]);
         const float prev = transientEnv[i];
@@ -338,10 +340,10 @@ void MaskEstimator::computeHorizontalMedian() noexcept
             // Access frames from newest to oldest within valid range
             // getHistoryFrame(horizontalMedianSize - 1) is the newest
             const int frameOffset = horizontalMedianSize - validFrames + t;
-            tempBuffer[t] = getHistoryFrame(frameOffset)[bin];
+            tempBuffer[static_cast<size_t>(t)] = getHistoryFrame(frameOffset)[bin];
         }
 
-        horizontalGuide[bin] = computeMedian(tempBuffer.data(), validFrames);
+        horizontalGuide[static_cast<size_t>(bin)] = computeMedian(tempBuffer.data(), validFrames);
     }
 }
 
@@ -362,10 +364,10 @@ void MaskEstimator::computeVerticalMedian() noexcept
         // Copy magnitudes from frequency neighborhood
         for (int i = 0; i < windowSize; ++i)
         {
-            tempBuffer[i] = currentMagnitudes[startBin + i];
+            tempBuffer[static_cast<size_t>(i)] = currentMagnitudes[startBin + i];
         }
 
-        verticalGuide[bin] = computeMedian(tempBuffer.data(), windowSize);
+        verticalGuide[static_cast<size_t>(bin)] = computeMedian(tempBuffer.data(), windowSize);
     }
 }
 
@@ -374,7 +376,7 @@ void MaskEstimator::computeSpectralFlux() noexcept
     // Spectral flux: frame-to-frame magnitude change |mag[n] - mag[n-1]|
     const float* currentMagnitudes = getCurrentFrame();
 
-    for (int i = 0; i < numBins; ++i)
+    for (size_t i = 0; i < static_cast<size_t>(numBins); ++i)
     {
         const float currentMag = currentMagnitudes[i];
         const float prevMag = previousMagnitudes[i];
@@ -410,7 +412,7 @@ void MaskEstimator::computeSpectralFlatness() noexcept
         
         if (actualWindowSize < 3)
         {
-            spectralFlatness[bin] = 0.5f; // Neutral value for edge cases
+            spectralFlatness[static_cast<size_t>(bin)] = 0.5f; // Neutral value for edge cases
             continue;
         }
         
@@ -435,12 +437,12 @@ void MaskEstimator::computeSpectralFlatness() noexcept
             const double geometricMean = std::exp(logSum / validBins);
             const double arithmeticMean = arithmeticSum / validBins;
             const double sfm = geometricMean / arithmeticMean;
-            
-            spectralFlatness[bin] = clamp01(static_cast<float>(sfm));
+
+            spectralFlatness[static_cast<size_t>(bin)] = clamp01(static_cast<float>(sfm));
         }
         else
         {
-            spectralFlatness[bin] = 0.5f; // Neutral value
+            spectralFlatness[static_cast<size_t>(bin)] = 0.5f; // Neutral value
         }
     }
 }
@@ -450,7 +452,7 @@ void MaskEstimator::applyAsymmetricSmoothing() noexcept
     // Asymmetric smoothing with different attack/release rates
     // Fast attack (α=0.5) preserves transients and quick changes
     // Slow release (α=0.15) reduces pumping artifacts for dramatic separation
-    for (int i = 0; i < numBins; ++i)
+    for (size_t i = 0; i < static_cast<size_t>(numBins); ++i)
     {
         const float current = combinedMask[i];
         const float previous = previousSmoothedMask[i];
@@ -477,7 +479,7 @@ void MaskEstimator::applySpectralFloor() noexcept
     const float floorLevel = halfThreshold;
     const float ceilingLevel = 1.0f - halfThreshold;
 
-    for (int i = 0; i < numBins; ++i)
+    for (size_t i = 0; i < static_cast<size_t>(numBins); ++i)
     {
         float mask = smoothedMask[i];
 
@@ -527,7 +529,7 @@ void MaskEstimator::applyFrequencyBlur() noexcept
             {
                 // Gaussian-like weight
                 const float weight = (j == 0) ? 0.5f : 0.25f;
-                weightedSum += tempBuffer[neighborBin] * weight;
+                weightedSum += tempBuffer[static_cast<size_t>(neighborBin)] * weight;
                 totalWeight += weight;
             }
         }
@@ -535,7 +537,8 @@ void MaskEstimator::applyFrequencyBlur() noexcept
         if (totalWeight > eps)
         {
             const float blurred = weightedSum / totalWeight;
-            smoothedMask[i] = blurMix * blurred + (1.0f - blurMix) * tempBuffer[i];
+            smoothedMask[static_cast<size_t>(i)] = blurMix * blurred
+                                                 + (1.0f - blurMix) * tempBuffer[static_cast<size_t>(i)];
         }
     }
 }
