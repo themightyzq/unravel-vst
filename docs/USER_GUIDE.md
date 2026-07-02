@@ -73,10 +73,19 @@ Useful for auditioning what the algorithm has assigned to each stream. Loading a
 
 A loader, not a "current state" indicator — pick one to apply its full setting; the menu then resets to "Presets" because the moment you tweak a knob the menu would otherwise be wrong. Built-ins:
 
-- **Default** — neutral / reset (all three streams at 0 dB, 75 % separation, no focus, no floor, no brightness shift).
+**General**
+- **Default** — neutral / reset (all three streams at 0 dB, 85 % separation, no focus, no floor, no brightness shift).
+- **Gentle Separation** — subtle blending (low separation, all three streams pass).
+
+**Isolate**
 - **Extract Tonal** — isolate harmonic content (mutes both Noise and Transient streams, strong separation, focus biased tonal).
 - **Extract Noise** — isolate the sustained noise residue (mutes both Tonal and Transient streams, strong separation, focus biased noise).
-- **Gentle Separation** — subtle blending (low separation, all three streams pass).
+
+**By material** *(starting points — expect to fine-tune by ear)*
+- **Dialogue De-noise** — voice intact, room tone / hiss pulled down ~20 dB, consonants kept (transients barely touched).
+- **Ambience Rescue** — drops tonal content (music bleed, hum) ~15 dB and keeps the ambient bed and texture.
+- **Tame Transients** — softens clicks and hits ~24 dB, leaves the body of the sound untouched.
+- **Transient Punch** — pushes hits forward +6 dB with the sustained bed slightly back.
 
 Each preset sets the **full** state, including clearing all Solo / Mute and turning Bypass off, so what you hear is exactly what the preset name promises.
 
@@ -88,9 +97,9 @@ The host's bypass control is mapped to this parameter (via JUCE's `getBypassPara
 
 ## Latency
 
-Unravel reports **~32 ms of latency at 48 kHz** (1536 samples = `fftSize − hopSize` with a 2048-point STFT at 75 % overlap). All hosts that perform Plugin Delay Compensation (PDC) align this automatically — your tracks stay in time. PDC is on by default in Logic, Live, Cubase, Reaper, Pro Tools, and Soundminer.
+Unravel reports **~43 ms of latency at 48 kHz** (2048 samples = one full analysis window of the 2048-point STFT). The figure is deliberately a full window rather than the theoretical minimum: it makes the plugin's real delay identical at **every** host buffer size — small buffers (64/128/256), odd sizes, and variable-block hosts like REAPER all stay sample-exact against PDC. All hosts that perform Plugin Delay Compensation align this automatically — your tracks stay in time. PDC is on by default in Logic, Live, Cubase, Reaper, Pro Tools, and Soundminer.
 
-If you're monitoring *through* the plugin live (recording while listening), you'll hear the 32 ms — that's not what Unravel is designed for. Use it for mixing, editing, restoration, and sound design.
+If you're monitoring *through* the plugin live (recording while listening), you'll hear the 43 ms — that's not what Unravel is designed for. Use it for mixing, editing, restoration, and sound design.
 
 ---
 
@@ -130,13 +139,11 @@ Both work. As of v1.2.0, Unravel loads on mono and stereo tracks (the previous s
 
 ### "I dropped it on a track and it sounds the same"
 
-That's expected at the defaults (Tonal 0 dB / Noise 0 dB at the centre of the XY pad means "let everything through unchanged"). Move the XY pad — pull the Noise gain down to keep just the tonal content, or pull Tonal down for just the texture.
+That's expected at the defaults (Tonal 0 dB / Noise 0 dB at the centre of the XY pad means "let everything through unchanged" — bit-perfect, in fact). The spectrum display will still be analyzing and moving, which is your "it's alive" signal. Move the XY pad — pull the Noise gain down to keep just the tonal content, or pull Tonal down for just the texture — or grab a starting point from the preset menu (e.g. **Dialogue De-noise**).
 
 ### Spectrum shows "Waiting for audio…" but my track is playing
 
-Two cases:
-1. **Bypass is on** — the spectrum intentionally clears when bypassed.
-2. **Both gains are exactly 0 dB** — at unity the plugin takes a transparent-passthrough optimization path that doesn't run the analysis, so the spectrum stays blank. Move the XY pad off centre and it'll populate.
+**Bypass is on** — the spectrum intentionally clears when bypassed. (In older builds the spectrum also stayed blank at unity gains; since the C6 fix the analysis runs continuously, so at default settings the display is live the moment audio plays.)
 
 ### High CPU?
 

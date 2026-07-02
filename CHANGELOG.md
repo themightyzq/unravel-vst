@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed (finish-line pass, 2026-07-02)
+
+- **PDC is now sample-exact at every host buffer size.** Found by the QA stress pass: the STFT produced output only in hop-sized bursts after a full analysis window, so the *realised* latency was `2048 − blockSize` — correct only at buffer 512+; at 128 the audio landed 384 samples (8 ms) late against the host's delay compensation, and non-hop-divisor buffers (odd sizes, REAPER's variable blocks) glitched with mid-stream zero-fill dropouts. Fix: the output ring is primed with one full window of zeros and the reported latency is now **2048 samples (~43 ms at 48 kHz, up from the previous nominal 1536/~32 ms)** — the information-theoretic minimum for glitch-free operation at arbitrary block sizes. Verified by a new harness gate sweeping buffers 64/128/256/333/512/1024: measured latency 2048 at all of them, zero dropouts.
+
+- **Exit-from-unity click eliminated (C6) — the last open STFT critical.** The unity-gain fast path no longer starves the STFT: the full analysis/synthesis pipeline runs every non-bypassed block, and when all three stream gains are settled at unity the output is taken from a bit-perfect, latency-matched delay line instead. Leaving unity now switches between two sample-aligned, near-identical signals (measured seam step 1.01× the sine's own slope; previously a dropout/click). The delay line is written every block and read at a fixed offset behind the write pointer, making its delay structurally exact — this also fixes a click when *entering* bypass/unity from stale delay-line history.
+- **Spectrum display is live at default settings.** Because the STFT stays fed at unity, the analyzer and mask ribbon now show activity the moment audio plays — no more "is it even working?" blank display on a fresh insert (R9/N1/U-C5 display symptom).
+- **Brightness automation no longer zippers.** While ramping, the 20 ms smoother advances per sample and the precomputed shelf coefficients swap at the exact sample where the ~0.1 dB table step changes (steady state keeps the single-set fast path).
+- **Spectrum dB labels sit exactly on their grid lines** (they used a different y-mapping than the grid), and the mask ribbon is now energy-weighted per bin — it only shows a tonal/transient/noise split where there is actually signal to split.
+
+### Changed (finish-line pass, 2026-07-02)
+
+- **Gain knobs use a mixing-fader taper** (skew 1.71): −12 dB at half travel, unity at ~74%. The old linear taper wasted the bottom third of the knob on −60…−40 dB. The XY pad's dB mapping is unchanged. *Note: normalized automation curves for the three gain parameters recorded in earlier sessions will map to slightly different dB values.*
+- **Preset menu grown and organized** (General / Isolate / By material): adds Dialogue De-noise, Ambience Rescue, Tame Transients, and Transient Punch as material-specific starting points.
+- **Spectrum snapshot publishes per STFT hop instead of per audio block** (removes 2–8× redundant lock-free publishes at small block sizes; visualization latency unchanged).
+
+### Internal (finish-line pass, 2026-07-02)
+
+- Harness grew two new gates: `REPORTED LATENCY vs MEASURED` (impulse through the full STFT path must peak exactly at `getLatencySamples()` at every block size 64…1024 — plus a per-block-size dropout scan) and `UNITY->ACTIVE TRANSITION` (continuity + no-dropout across the unity seam). The latter caught a delay-line drift bug during development of the C6 fix before it ever shipped; the former is what pinned down the block-size PDC bug above.
+
 ### Changed (onboarding/reclamation pass, 2026-06-28)
 
 - **`sign_and_notarize.sh` now signs, notarizes, and staples all three macOS formats** (VST3 + AU `.component` + Standalone `.app`) and installs the AU, instead of VST3 only. The README directs users to all three, so the AU and Standalone previously shipped unsigned and tripped Gatekeeper on first launch.
