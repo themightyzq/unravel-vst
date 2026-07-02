@@ -36,6 +36,12 @@ public:
     juce::Font getTextButtonFont(juce::TextButton&, int buttonHeight) override;
     juce::Font getComboBoxFont(juce::ComboBox&) override;
 
+    // Keyboard-focus indicator. Any control that calls setHasFocusOutline(true)
+    // gets this drawn around it while it holds keyboard focus (Desktop drives it
+    // via createFocusOutlineForComponent on every focus change). We draw a 2px
+    // Theme::accent ring so keyboard users can see where focus is (D-8/R10).
+    std::unique_ptr<juce::FocusOutline> createFocusOutlineForComponent(juce::Component&) override;
+
 private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CustomLookAndFeel)
 };

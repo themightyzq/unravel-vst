@@ -191,7 +191,7 @@ void SpectrumDisplay::drawSpectrum(juce::Graphics& g)
     for (int bin = 1; bin < cachedNumBins; ++bin)  // Skip DC
     {
         const float x = binToX(bin, cachedNumBins, width);
-        const float db = magnitudeToDb(displayMagnitudes[bin]);
+        const float db = magnitudeToDb(displayMagnitudes[static_cast<size_t>(bin)]);
         const float y = dbToY(db, height);
 
         if (!pathStarted)
@@ -229,21 +229,33 @@ void SpectrumDisplay::drawMasks(juce::Graphics& g)
     // transient (yellow) in the middle, noise (orange) on top. Because the masks
     // are mass-conserving (tonal + transient + noise = 1), the three regions
     // exactly fill the band, faithfully showing the per-frequency split.
-    const float bandH   = height * 0.18f;
-    const float bandTop = height - bandH;
+    // The band height itself is weighted by the bin's magnitude (0 at the
+    // display floor, full height at 0 dBFS), so the ribbon only shows a split
+    // where there is actually energy to split — a mask share of silence is
+    // meaningless and used to paint the whole width regardless of signal.
+    const float bandH = height * 0.18f;
 
+    auto energyWeight = [&](int bin)
+    {
+        return juce::jlimit(0.0f, 1.0f, (magnitudeToDb(displayMagnitudes[static_cast<size_t>(bin)]) - minDb) / dbRange);
+    };
     auto splitTonalY = [&](int bin)
     {
-        // Top of the tonal region = bottom - tonal * bandH
-        const float t = juce::jlimit(0.0f, 1.0f, displayTonalMask[bin]);
-        return height - t * bandH;
+        // Top of the tonal region = bottom - tonal * weightedBand
+        const float t = juce::jlimit(0.0f, 1.0f, displayTonalMask[static_cast<size_t>(bin)]);
+        return height - t * energyWeight(bin) * bandH;
     };
     auto splitTransientY = [&](int bin)
     {
-        // Top of the (tonal + transient) stack = bottom - (tonal+transient)*bandH
-        const float t  = juce::jlimit(0.0f, 1.0f, displayTonalMask[bin]);
-        const float tr = juce::jlimit(0.0f, 1.0f, displayTransientMask[bin]);
-        return height - juce::jmin(1.0f, t + tr) * bandH;
+        // Top of the (tonal + transient) stack = bottom - (tonal+transient) * weightedBand
+        const float t  = juce::jlimit(0.0f, 1.0f, displayTonalMask[static_cast<size_t>(bin)]);
+        const float tr = juce::jlimit(0.0f, 1.0f, displayTransientMask[static_cast<size_t>(bin)]);
+        return height - juce::jmin(1.0f, t + tr) * energyWeight(bin) * bandH;
+    };
+    auto ribbonTopY = [&](int bin)
+    {
+        // Top of the whole (mass-conserving) stack = bottom - weightedBand
+        return height - energyWeight(bin) * bandH;
     };
 
     // Each path extends to x=0 using bin-1's split height so the three regions
@@ -251,10 +263,11 @@ void SpectrumDisplay::drawMasks(juce::Graphics& g)
     // to x=0 would slope diagonally and leave a visible mass-conservation gap
     // in the leftmost (~5% in LOG mode) strip.
 
-    // Noise share (orange): bandTop (straight top) down to the tonal+transient split.
+    // Noise share (orange): energy-weighted stack top down to the tonal+transient split.
     juce::Path noisePath;
-    noisePath.startNewSubPath(0.0f, bandTop);
-    noisePath.lineTo(width, bandTop);
+    noisePath.startNewSubPath(0.0f, ribbonTopY(1));
+    for (int bin = 1; bin < cachedNumBins; ++bin)
+        noisePath.lineTo(binToX(bin, cachedNumBins, width), ribbonTopY(bin));
     for (int bin = cachedNumBins - 1; bin >= 1; --bin)
         noisePath.lineTo(binToX(bin, cachedNumBins, width), splitTransientY(bin));
     noisePath.lineTo(0.0f, splitTransientY(1)); // vertical close at left edge
@@ -294,12 +307,15 @@ void SpectrumDisplay::drawLabels(juce::Graphics& g)
     g.setColour(juce::Colour(0xff888888));  // Improved contrast
     g.setFont(juce::FontOptions(10.0f));    // Minimum readable size
 
-    // dB labels on right side
+    // dB labels on right side — same dbToY mapping as the grid lines in
+    // drawBackground, so each label sits exactly on its line. The 0 dB label
+    // is nudged inside the top edge instead of skipped.
     for (float db = minDb + 20.0f; db <= maxDb; db += 20.0f)
     {
-        const float y = dbToY(db, height - 16.0f);  // Leave room for freq labels
+        const float y = dbToY(db, height);
+        const int textY = juce::jlimit(2, getHeight() - 28, static_cast<int>(y) - 6);
         g.drawText(juce::String(static_cast<int>(db)) + " dB",
-                  getWidth() - 35, static_cast<int>(y) - 6, 30, 12,
+                  getWidth() - 35, textY, 30, 12,
                   juce::Justification::right);
     }
 

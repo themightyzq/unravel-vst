@@ -43,12 +43,40 @@ UnravelAudioProcessorEditor::UnravelAudioProcessorEditor(UnravelAudioProcessor& 
     scaleToggleButton.setColour(juce::TextButton::textColourOffId, accent);
     scaleToggleButton.setTooltip("Toggle spectrum display between logarithmic (LOG) and linear (LIN) frequency scale. "
                                   "LOG shows more detail in lower frequencies, LIN shows equal spacing.");
+    scaleToggleButton.setHasFocusOutline(true);
+    scaleToggleButton.setTitle("Spectrum frequency scale");
+    scaleToggleButton.setDescription("Toggle logarithmic or linear frequency scale");
     scaleToggleButton.onClick = [this]() {
         bool newLogState = !spectrumDisplay->isLogScale();
         spectrumDisplay->setLogScale(newLogState);
         scaleToggleButton.setButtonText(newLogState ? "LOG" : "LIN");
     };
     addAndMakeVisible(scaleToggleButton);
+
+    // === Keyboard focus traversal order (D-8/R10) ===
+    // Explicit order gives a predictable Tab sequence that follows the visual
+    // reading order (header -> XY pad + transient fader -> knob row -> per-stream
+    // solo/mute footer -> spectrum scale toggle) instead of the undefined
+    // child-add order. The XY pad is a single Tab stop; its internal zoom buttons
+    // are intentionally kept out of the Tab order (see XYPad) so the pad reads as
+    // one control. Every listed control also has setWantsKeyboardFocus(true)
+    // (sliders) or inherits it (buttons/combo).
+    int focusOrder = 1;
+    bypassButton.setExplicitFocusOrder(focusOrder++);
+    presetSelector.setExplicitFocusOrder(focusOrder++);
+    xyPad->setExplicitFocusOrder(focusOrder++);
+    transientGainSlider.setExplicitFocusOrder(focusOrder++);
+    separationKnob.setExplicitFocusOrder(focusOrder++);
+    focusKnob.setExplicitFocusOrder(focusOrder++);
+    floorKnob.setExplicitFocusOrder(focusOrder++);
+    brightnessKnob.setExplicitFocusOrder(focusOrder++);
+    soloTonalButton.setExplicitFocusOrder(focusOrder++);
+    muteTonalButton.setExplicitFocusOrder(focusOrder++);
+    soloNoiseButton.setExplicitFocusOrder(focusOrder++);
+    muteNoiseButton.setExplicitFocusOrder(focusOrder++);
+    soloTransientButton.setExplicitFocusOrder(focusOrder++);
+    muteTransientButton.setExplicitFocusOrder(focusOrder++);
+    scaleToggleButton.setExplicitFocusOrder(focusOrder++);
 
     // Window configuration
     setResizable(true, true);
@@ -97,6 +125,11 @@ void UnravelAudioProcessorEditor::setupHeader()
     bypassButton.setColour(juce::TextButton::textColourOnId, juce::Colours::white);
     bypassButton.setTooltip("Bypass: Turn off all processing and pass audio through unchanged. "
                             "Use this to compare processed vs original sound.");
+    // Accessibility: TextButton already wants keyboard focus by default; add the
+    // focus ring and a screen-reader name (D-8/R10).
+    bypassButton.setHasFocusOutline(true);
+    bypassButton.setTitle("Bypass");
+    bypassButton.setDescription("Bypass all processing");
     addAndMakeVisible(bypassButton);
     bypassAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         audioProcessor.getAPVTS(), ParameterIDs::bypass, bypassButton);
@@ -117,6 +150,14 @@ void UnravelAudioProcessorEditor::setupKnobs()
         knob.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
         knob.setColour(juce::Slider::textBoxBackgroundColourId, bgMid);
         knob.setTooltip(tooltip);
+        // Accessibility: juce::Slider defaults to setWantsKeyboardFocus(false)
+        // (juce_Slider.cpp), so enable it explicitly to make the knob a Tab stop.
+        // Arrow keys then adjust the value; the Slider's built-in
+        // AccessibilityValueInterface announces the value from its APVTS-driven
+        // text box. setTitle gives the screen reader a stable name (D-8/R10).
+        knob.setWantsKeyboardFocus(true);
+        knob.setHasFocusOutline(true);
+        knob.setTitle(name);
         addAndMakeVisible(knob);
 
         label.setText(name, juce::dontSendNotification);
@@ -155,7 +196,8 @@ void UnravelAudioProcessorEditor::setupKnobs()
 void UnravelAudioProcessorEditor::setupSoloMute()
 {
     auto setupButton = [this](juce::TextButton& btn, const juce::String& text,
-                              juce::Colour onColor, const juce::String& tooltip) {
+                              juce::Colour onColor, const juce::String& tooltip,
+                              const juce::String& accessibleName) {
         btn.setButtonText(text);
         btn.setClickingTogglesState(true);
         btn.setColour(juce::TextButton::buttonColourId, bgMid);
@@ -163,6 +205,11 @@ void UnravelAudioProcessorEditor::setupSoloMute()
         btn.setColour(juce::TextButton::textColourOffId, textBright);
         btn.setColour(juce::TextButton::textColourOnId, juce::Colours::black);
         btn.setTooltip(tooltip);
+        // Accessibility: the on-screen text is just "SOLO"/"MUTE" and repeats
+        // across three streams, so give each button a distinct screen-reader
+        // name ("Solo Tonal", "Mute Noise", ...) plus the focus ring (D-8/R10).
+        btn.setHasFocusOutline(true);
+        btn.setTitle(accessibleName);
         addAndMakeVisible(btn);
     };
 
@@ -175,10 +222,12 @@ void UnravelAudioProcessorEditor::setupSoloMute()
 
     setupButton(soloTonalButton, "SOLO", juce::Colour(0xffffcc00),
                 "Solo Tonal: Listen to ONLY the tonal component (harmonics, melodies, sustained sounds). "
-                "Great for checking what's being detected as tonal.");
+                "Great for checking what's being detected as tonal.",
+                "Solo Tonal");
     setupButton(muteTonalButton, "MUTE", juce::Colour(0xffcc3333),
                 "Mute Tonal: Remove the tonal component from the output. "
-                "You'll hear only the noise/texture portion of your audio.");
+                "You'll hear only the noise/texture portion of your audio.",
+                "Mute Tonal");
 
     soloTonalAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         audioProcessor.getAPVTS(), ParameterIDs::soloTonal, soloTonalButton);
@@ -194,10 +243,12 @@ void UnravelAudioProcessorEditor::setupSoloMute()
 
     setupButton(soloNoiseButton, "SOLO", juce::Colour(0xffffcc00),
                 "Solo Noise: Listen to ONLY the noise component (transients, textures, breath, ambience). "
-                "Great for checking what's being detected as noise.");
+                "Great for checking what's being detected as noise.",
+                "Solo Noise");
     setupButton(muteNoiseButton, "MUTE", juce::Colour(0xffcc3333),
                 "Mute Noise: Remove the noise component from the output. "
-                "You'll hear only the tonal/harmonic portion of your audio.");
+                "You'll hear only the tonal/harmonic portion of your audio.",
+                "Mute Noise");
 
     soloNoiseAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         audioProcessor.getAPVTS(), ParameterIDs::soloNoise, soloNoiseButton);
@@ -213,10 +264,12 @@ void UnravelAudioProcessorEditor::setupSoloMute()
 
     setupButton(soloTransientButton, "SOLO", juce::Colour(0xffffcc00),
                 "Solo Transient: listen to ONLY the transient component (drum hits, plosives, attacks). "
-                "Great for checking what's being detected as a transient.");
+                "Great for checking what's being detected as a transient.",
+                "Solo Transient");
     setupButton(muteTransientButton, "MUTE", juce::Colour(0xffcc3333),
                 "Mute Transient: remove the transient component from the output. "
-                "You'll hear only the tonal + noise (sustained) content.");
+                "You'll hear only the tonal + noise (sustained) content.",
+                "Mute Transient");
 
     soloTransientAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         audioProcessor.getAPVTS(), ParameterIDs::soloTransient, soloTransientButton);
@@ -237,6 +290,11 @@ void UnravelAudioProcessorEditor::setupSoloMute()
                                    "push up to emphasize them. Note: at the XY pad corners, the "
                                    "transient stream is implicitly silenced regardless of this "
                                    "slider — push the pad back toward center to hear it again.");
+    // Accessibility: juce::Slider defaults to no keyboard focus — enable it,
+    // add the focus ring, and name it for the screen reader (D-8/R10).
+    transientGainSlider.setWantsKeyboardFocus(true);
+    transientGainSlider.setHasFocusOutline(true);
+    transientGainSlider.setTitle("Transient Gain");
     addAndMakeVisible(transientGainSlider);
 
     transientGainLabel.setText("TRANS", juce::dontSendNotification);
@@ -261,10 +319,17 @@ void UnravelAudioProcessorEditor::setupPresets()
     // Preset dropdown. This acts as a loader (an action menu), not a "current state"
     // indicator: it shows "Presets" when idle and resets after loading, so it can
     // never falsely claim to reflect controls the user has since moved.
+    presetSelector.addSectionHeading("General");
     presetSelector.addItem("Default", 1);
+    presetSelector.addItem("Gentle Separation", 4);
+    presetSelector.addSectionHeading("Isolate");
     presetSelector.addItem("Extract Tonal", 2);
     presetSelector.addItem("Extract Noise", 3);
-    presetSelector.addItem("Gentle Separation", 4);
+    presetSelector.addSectionHeading("By material");
+    presetSelector.addItem("Dialogue De-noise", 5);
+    presetSelector.addItem("Ambience Rescue", 6);
+    presetSelector.addItem("Tame Transients", 7);
+    presetSelector.addItem("Transient Punch", 8);
     presetSelector.setTextWhenNothingSelected("Presets");
     presetSelector.setSelectedId(0, juce::dontSendNotification);
     presetSelector.setColour(juce::ComboBox::backgroundColourId, bgLight);
@@ -274,6 +339,11 @@ void UnravelAudioProcessorEditor::setupPresets()
     presetSelector.setTooltip("Quick Presets: load a starting point (this sets ALL controls). "
                               "'Default' resets to neutral. 'Extract Tonal' isolates melodies/harmonics. "
                               "'Extract Noise' isolates textures/ambience. 'Gentle' gives subtle separation.");
+    // Accessibility: ComboBox wants keyboard focus by default; add the focus ring
+    // and a screen-reader name. Enter/arrow keys open and step the menu (D-8/R10).
+    presetSelector.setHasFocusOutline(true);
+    presetSelector.setTitle("Preset");
+    presetSelector.setDescription("Load a preset that sets all controls");
     presetSelector.onChange = [this]() {
         // loadPreset args: tonalDb, noiseDb, transientDb, separation%, focus, floor%, brightnessDb
         // Extract Tonal / Extract Noise also mute the Transient stream — isolating
@@ -284,6 +354,10 @@ void UnravelAudioProcessorEditor::setupPresets()
             case 2: loadPreset(0.0f,  -60.0f, -60.0f, 90.0f, -50.0f, 30.0f, 0.0f); break; // Extract Tonal — mute noise + transient
             case 3: loadPreset(-60.0f,  0.0f, -60.0f, 90.0f,  50.0f, 30.0f, 0.0f); break; // Extract Noise — mute tonal + transient
             case 4: loadPreset(0.0f,    0.0f,   0.0f, 40.0f,   0.0f, 0.0f,  0.0f); break; // Gentle (all streams pass, soft separation)
+            case 5: loadPreset(0.0f,  -20.0f,  -3.0f, 80.0f, -20.0f, 10.0f, 0.0f); break; // Dialogue De-noise — voice intact, room/hiss pulled down, consonants kept
+            case 6: loadPreset(-15.0f,  0.0f,   0.0f, 85.0f,  30.0f, 10.0f, 0.0f); break; // Ambience Rescue — drop tonal (music/hum), keep the ambient bed + texture
+            case 7: loadPreset(0.0f,    0.0f, -24.0f, 75.0f,   0.0f, 0.0f,  0.0f); break; // Tame Transients — soften clicks/hits, leave the body untouched
+            case 8: loadPreset(0.0f,   -6.0f,  +6.0f, 80.0f,   0.0f, 0.0f,  0.0f); break; // Transient Punch — hits forward, bed slightly back
             default: return;
         }
         // Reset to the "Presets" placeholder (no notification → no re-entry).

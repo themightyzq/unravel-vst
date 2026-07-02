@@ -188,3 +188,30 @@ juce::Font CustomLookAndFeel::getComboBoxFont(juce::ComboBox&)
 {
     return juce::Font(juce::FontOptions(Theme::fontLabel));
 }
+
+std::unique_ptr<juce::FocusOutline> CustomLookAndFeel::createFocusOutlineForComponent(juce::Component&)
+{
+    // A visible keyboard-focus ring drawn just outside the focused control.
+    // The outline lives in a sibling/overlay window sized to getOutlineBounds(),
+    // so we expand a few px past the control and stroke inside those bounds to
+    // keep the full 2px stroke visible instead of clipping half of it.
+    struct FocusRingProperties final : public juce::FocusOutline::OutlineWindowProperties
+    {
+        juce::Rectangle<int> getOutlineBounds(juce::Component& c) override
+        {
+            return c.getScreenBounds().expanded(3);
+        }
+
+        void drawOutline(juce::Graphics& g, int width, int height) override
+        {
+            auto bounds = juce::Rectangle<float>(0.0f, 0.0f,
+                                                 static_cast<float>(width),
+                                                 static_cast<float>(height)).reduced(1.5f);
+            // Theme::accent on the dark UI clears WCAG 1.4.11 non-text contrast (>3:1).
+            g.setColour(Theme::accent);
+            g.drawRoundedRectangle(bounds, Theme::cornerRadius + 2.0f, 2.0f);
+        }
+    };
+
+    return std::make_unique<juce::FocusOutline>(std::make_unique<FocusRingProperties>());
+}

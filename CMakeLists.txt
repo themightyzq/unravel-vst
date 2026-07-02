@@ -58,7 +58,20 @@ juce_add_plugin(Unravel
     NEEDS_MIDI_INPUT FALSE
     NEEDS_MIDI_OUTPUT FALSE
     IS_MIDI_EFFECT FALSE
-    EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+    # EDITOR_WANTS_KEYBOARD_FOCUS drives the JucePlugin_EditorRequiresKeyboardFocus
+    # define. When FALSE, the wrapper attaches the editor to the host window with
+    # ComponentPeer::windowIgnoresKeyPresses (see juce_VSTWindowUtilities.h) and the
+    # AU EditorCompHolder calls setWantsKeyboardFocus(false) — so key events never
+    # reach any control and Tab/arrow-key navigation is impossible. TRUE lets the
+    # editor receive keyboard focus so knobs, buttons, the combo and the XY pad are
+    # keyboard-operable (backlog D-8/R10 accessibility).
+    #
+    # Host-interop caveat: with focus enabled the plugin window can capture keys
+    # (e.g. Space, arrows) that some hosts otherwise route to transport/edit while
+    # the editor is focused. In practice this only happens while a Unravel control
+    # is focused; clicking back into the host arrangement returns keys to the host.
+    # This is the standard trade-off for any keyboard-accessible plugin UI.
+    EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     # COPY_PLUGIN_AFTER_BUILD installs to the system plugin folder after a
     # local build. Enabled for developer ergonomics; suppressed in CI where
     # the system path is unwritable on Windows (admin required) and

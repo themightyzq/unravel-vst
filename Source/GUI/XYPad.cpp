@@ -49,6 +49,11 @@ XYPad::XYPad(juce::AudioProcessorValueTreeState& apvts_)
         btn.setColour(juce::TextButton::buttonColourId, backgroundColour.darker(0.2f));
         btn.setColour(juce::TextButton::textColourOffId, thumbColour);
         btn.setTooltip(tooltip);
+        // Keep the zoom controls out of the keyboard Tab order so the XY pad reads
+        // as a single focus stop (D-8/R10). Zoom is a view-only convenience — the
+        // pad itself is fully keyboard-operable via arrow keys — and it remains
+        // mouse-clickable. TextButton defaults to wanting focus, so opt out here.
+        btn.setWantsKeyboardFocus(false);
         addAndMakeVisible(btn);
     };
 
@@ -172,7 +177,8 @@ void XYPad::paint(juce::Graphics& g)
         g.setFont(juce::FontOptions(11.0f));
         juce::String zoomText = juce::String(zoomLevel_, 1) + "x";
         g.drawText(zoomText,
-                   bounds.getRight() - 70, bounds.getY() + 6,  // Moved left to avoid buttons
+                   static_cast<int>(bounds.getRight()) - 70,   // Moved left to avoid buttons
+                   static_cast<int>(bounds.getY()) + 6,
                    34, 14,
                    juce::Justification::right);
     }
@@ -415,7 +421,7 @@ void XYPad::timerCallback()
             hintAlpha_ = juce::jmax(0.0f, hintAlpha_ - 0.05f);
             if (hintAlpha_ <= 0.0f)
                 showHint_ = false;
-            if (hintAlpha_ != prevAlpha)
+            if (! juce::approximatelyEqual(hintAlpha_, prevAlpha))
                 changed = true;
         }
     }
@@ -965,7 +971,7 @@ void XYPad::drawMinimap(juce::Graphics& g)
 void XYPad::zoomIn()
 {
     float newZoom = juce::jlimit(kMinZoom, kMaxZoom, zoomLevel_ + kZoomStep);
-    if (newZoom != zoomLevel_)
+    if (! juce::approximatelyEqual(newZoom, zoomLevel_))
     {
         zoomLevel_ = newZoom;
         repaint();
@@ -975,7 +981,7 @@ void XYPad::zoomIn()
 void XYPad::zoomOut()
 {
     float newZoom = juce::jlimit(kMinZoom, kMaxZoom, zoomLevel_ - kZoomStep);
-    if (newZoom != zoomLevel_)
+    if (! juce::approximatelyEqual(newZoom, zoomLevel_))
     {
         zoomLevel_ = newZoom;
         repaint();
