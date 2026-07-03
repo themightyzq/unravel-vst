@@ -15,6 +15,38 @@ void MaskEstimator::prepare(int newNumBins, double newSampleRate) noexcept
     this->numBins = newNumBins;
     this->sampleRate = newSampleRate;
 
+    // --- Frame-rate normalization of temporal constants (REVIEW-QA QA-M1) ---
+    // The hop is architecturally fftSize/4 (75% overlap) and numBins is
+    // fftSize/2 + 1, so hop = (numBins - 1) / 2. All Ref constants are tuned
+    // at refFrameRate (48 kHz / 512 = 93.75 frames/s); rescale them so the
+    // time windows in seconds stay constant at any sample rate. At exactly
+    // 48 kHz the exponent/ratio are 1.0 and the tuned values are unchanged.
+    const double hopSize = static_cast<double>(std::max(1, (newNumBins - 1) / 2));
+    const double frameRate = newSampleRate / hopSize;
+    const double frameRatio = frameRate / refFrameRate;
+
+    horizontalMedianFrames_ = juce::jlimit(1, maxHorizontalMedianFrames,
+        static_cast<int>(std::lround(horizontalMedianFramesRef * frameRatio)));
+
+    // Per-frame one-pole alphas: match the per-second decay of the reference,
+    // (1 - a_new)^frameRate == (1 - a_ref)^refFrameRate.
+    const double alphaExponent = refFrameRate / frameRate;
+    auto rescaleAlpha = [alphaExponent](float refAlpha) noexcept
+    {
+        return static_cast<float>(1.0 - std::pow(1.0 - static_cast<double>(refAlpha),
+                                                 alphaExponent));
+    };
+    attackAlpha_       = rescaleAlpha(attackAlphaRef);
+    releaseAlpha_      = rescaleAlpha(releaseAlphaRef);
+    transientAttack_   = rescaleAlpha(transientAttackRef);
+    transientRelease_  = rescaleAlpha(transientReleaseRef);
+    onsetBaselineRise_ = rescaleAlpha(onsetBaselineRiseRef);
+    onsetBaselineFall_ = rescaleAlpha(onsetBaselineFallRef);
+
+    // Onset gate starts closed: baseline at the flux ceiling, gate at 0.
+    onsetOdfBaseline_ = 1.0f;
+    onsetGate_ = 0.0f;
+
     const auto binCount = static_cast<size_t>(newNumBins);
 
     // Allocate HPSS guide signals
@@ -31,16 +63,17 @@ void MaskEstimator::prepare(int newNumBins, double newSampleRate) noexcept
     flatnessMask.resize(binCount, 0.0f);
     combinedMask.resize(binCount, 0.0f);
     smoothedMask.resize(binCount, 0.0f);
-    tempBuffer.resize(static_cast<size_t>(std::max(newNumBins, horizontalMedianSize)), 0.0f);
+    tempBuffer.resize(static_cast<size_t>(std::max(newNumBins, horizontalMedianFrames_)), 0.0f);
 
     // Initialize previous frame data
     previousMagnitudes.resize(binCount, 0.0f);
     previousSmoothedMask.resize(binCount, 0.5f); // Start with neutral masks
     transientEnv.resize(binCount, 0.0f);
 
-    // Initialize magnitude history (fixed ring buffer for horizontal median)
-    // Pre-allocate all memory once - NO allocations during processing
-    magnitudeHistoryData.resize(static_cast<size_t>(horizontalMedianSize * newNumBins), 0.0f);
+    // Initialize magnitude history (fixed ring buffer for horizontal median).
+    // Pre-allocate all memory once for the prepared rate's frame count —
+    // NO allocations during processing.
+    magnitudeHistoryData.resize(static_cast<size_t>(horizontalMedianFrames_ * newNumBins), 0.0f);
     historyWriteIndex = 0;
     framesReceived = 0;  // Start with no valid frames
 
@@ -76,9 +109,13 @@ void MaskEstimator::reset() noexcept
     
     // Clear magnitude history ring buffer and reset write index
     juce::FloatVectorOperations::clear(magnitudeHistoryData.data(),
-                                       horizontalMedianSize * numBins);
+                                       horizontalMedianFrames_ * numBins);
     historyWriteIndex = 0;
     framesReceived = 0;  // Reset valid frame count
+
+    // Onset gate back to the closed startup state.
+    onsetOdfBaseline_ = 1.0f;
+    onsetGate_ = 0.0f;
 
     lowFreqTracker.reset();
 }
@@ -94,10 +131,10 @@ void MaskEstimator::updateGuides(juce::Span<const float> magnitudes) noexcept
     juce::FloatVectorOperations::copy(writePosition, magnitudes.data(), numBins);
 
     // Advance write index (wrap around)
-    historyWriteIndex = (historyWriteIndex + 1) % horizontalMedianSize;
+    historyWriteIndex = (historyWriteIndex + 1) % horizontalMedianFrames_;
 
-    // Track how many valid frames we have (cap at horizontalMedianSize)
-    if (framesReceived < horizontalMedianSize)
+    // Track how many valid frames we have (cap at horizontalMedianFrames_)
+    if (framesReceived < horizontalMedianFrames_)
         framesReceived++;
 
     // Compute horizontal and vertical median filters
@@ -304,11 +341,28 @@ void MaskEstimator::finalizeMasksFromSmoothed(juce::Span<float> tonalMask,
     // Onsets immediately push transientness toward 1 (fast attack) so a short
     // broadband event flows to the Transient stream; as the event sustains the
     // envelope decays (slow release) and the energy moves back into Noise.
+    //
+    // The per-bin flux is gated by the FRAME-level onset gate (see
+    // computeSpectralFlux): a steady broadband bed keeps its per-bin flux
+    // high forever, so ungated flux held the envelope open and routed steady
+    // hiss into the Transient stream. Gated, the envelope only charges on
+    // actual onsets (clicks, hits, plosives) and releases the bed back to
+    // the Noise stream between them.
     for (size_t i = 0; i < static_cast<size_t>(numBins); ++i)
     {
-        const float flux = clamp01(spectralFlux[i]);
-        const float prev = transientEnv[i];
-        const float alpha = (flux > prev) ? transientAttack : transientRelease;
+        // clamp01 is NaN-safe (NaN -> 0), so flux is always finite in [0, 1].
+        const float flux = clamp01(spectralFlux[i]) * onsetGate_;
+
+        // Self-healing recurrence (REVIEW-QA QA-C2): a non-finite value that
+        // ever entered the envelope state (e.g. inf/inf -> NaN from an Inf
+        // input sample) would otherwise persist forever, since
+        // prev + (flux - prev) * alpha keeps NaN for every subsequent frame.
+        // Reset poisoned state to 0 so the follower recovers within frames.
+        float prev = transientEnv[i];
+        if (!std::isfinite(prev))
+            prev = 0.0f;
+
+        const float alpha = (flux > prev) ? transientAttack_ : transientRelease_;
         transientEnv[i] = prev + (flux - prev) * alpha;
 
         const float t  = clamp01(smoothedMask[i]);
@@ -338,8 +392,8 @@ void MaskEstimator::computeHorizontalMedian() noexcept
         for (int t = 0; t < validFrames; ++t)
         {
             // Access frames from newest to oldest within valid range
-            // getHistoryFrame(horizontalMedianSize - 1) is the newest
-            const int frameOffset = horizontalMedianSize - validFrames + t;
+            // getHistoryFrame(horizontalMedianFrames_ - 1) is the newest
+            const int frameOffset = horizontalMedianFrames_ - validFrames + t;
             tempBuffer[static_cast<size_t>(t)] = getHistoryFrame(frameOffset)[bin];
         }
 
@@ -376,6 +430,12 @@ void MaskEstimator::computeSpectralFlux() noexcept
     // Spectral flux: frame-to-frame magnitude change |mag[n] - mag[n-1]|
     const float* currentMagnitudes = getCurrentFrame();
 
+    // Frame-level onset detection function: mean of the HALF-WAVE (rising
+    // only) per-bin flux. Rising flux across many bins at once = an onset;
+    // a steady stochastic bed rises and falls symmetrically bin-to-bin, so
+    // its mean rising flux is statistically constant frame after frame.
+    float risingFluxSum = 0.0f;
+
     for (size_t i = 0; i < static_cast<size_t>(numBins); ++i)
     {
         const float currentMag = currentMagnitudes[i];
@@ -386,13 +446,37 @@ void MaskEstimator::computeSpectralFlux() noexcept
         const float localEnergy = std::max(currentMag, prevMag);
         if (localEnergy > eps)
         {
-            spectralFlux[i] = clamp01(magChange / localEnergy);
+            const float flux = clamp01(magChange / localEnergy);
+            spectralFlux[i] = flux;
+            if (currentMag > prevMag)
+                risingFluxSum += flux;
         }
         else
         {
             spectralFlux[i] = 0.0f;
         }
     }
+
+    // --- Onset gate update (REVIEW-UX finding 7: steady noise != transient) ---
+    // Compare this frame's mean rising flux against its own slow baseline.
+    // Steady beds sit at ratio ~1 (gate closed, ±1/sqrt(numBins) fluctuation
+    // is far below the 1.5x opening threshold); genuine broadband onsets
+    // spike the ratio several-fold and open the gate for that frame.
+    const float odf = risingFluxSum / static_cast<float>(std::max(1, numBins));
+
+    // Baseline: asymmetric one-pole. Rises slowly — and never toward more
+    // than 4x its current value per update — so sparse onset spikes cannot
+    // drag it up and desensitise the gate; falls faster so it re-settles onto
+    // quieter programme. Floored so the ratio is well-defined out of silence.
+    const float clampedOdf = std::min(odf, onsetOdfBaseline_ * 4.0f);
+    const float baselineAlpha = (clampedOdf > onsetOdfBaseline_) ? onsetBaselineRise_
+                                                                 : onsetBaselineFall_;
+    onsetOdfBaseline_ += (clampedOdf - onsetOdfBaseline_) * baselineAlpha;
+    onsetOdfBaseline_ = std::max(onsetOdfBaseline_, onsetBaselineFloor);
+
+    const float ratio = odf / onsetOdfBaseline_;
+    onsetGate_ = clamp01((ratio - onsetGateOpenRatio)
+                         / (onsetGateFullRatio - onsetGateOpenRatio));
 }
 
 void MaskEstimator::computeSpectralFlatness() noexcept
@@ -450,8 +534,9 @@ void MaskEstimator::computeSpectralFlatness() noexcept
 void MaskEstimator::applyAsymmetricSmoothing() noexcept
 {
     // Asymmetric smoothing with different attack/release rates
-    // Fast attack (α=0.5) preserves transients and quick changes
-    // Slow release (α=0.15) reduces pumping artifacts for dramatic separation
+    // Fast attack (α=0.5 @48k) preserves transients and quick changes
+    // Slow release (α=0.15 @48k) reduces pumping artifacts for dramatic
+    // separation. Alphas are frame-rate normalized in prepare().
     for (size_t i = 0; i < static_cast<size_t>(numBins); ++i)
     {
         const float current = combinedMask[i];
@@ -459,7 +544,7 @@ void MaskEstimator::applyAsymmetricSmoothing() noexcept
 
         // Choose alpha based on direction of change
         // Attack when mask increases (more signal), release when decreasing
-        const float alpha = (current > previous) ? attackAlpha : releaseAlpha;
+        const float alpha = (current > previous) ? attackAlpha_ : releaseAlpha_;
 
         smoothedMask[i] = alpha * current + (1.0f - alpha) * previous;
     }

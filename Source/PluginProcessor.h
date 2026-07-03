@@ -146,7 +146,18 @@ private:
     std::vector<float> snapNoiseMask_;
     std::atomic<uint32_t> snapSeq_ { 0 };
     bool lastPublishedBypassed_ = false;   // audio thread only: gates the one-shot bypass publish
+    std::atomic<float> effectiveTransientDb_ { 0.0f };  // post-knee transient gain for the UI
     void publishSpectrumSnapshot(bool bypassed) noexcept;
+
+public:
+    /** Effective transient gain in dB after the pad-corner knee and solo/mute
+        (what the audio actually uses; the fader shows the raw setting). */
+    float getEffectiveTransientDb() const noexcept
+    {
+        return effectiveTransientDb_.load(std::memory_order_relaxed);
+    }
+
+private:
 
 public:
     // Spectrum visualization (thread-safe snapshot).

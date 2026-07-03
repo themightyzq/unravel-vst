@@ -14,6 +14,22 @@ void LowFreqPartialTracker::prepare(int numBins, double sampleRate) noexcept
     const int fftSize = (numBins - 1) * 2;
     binHz_ = sampleRate / static_cast<double>(fftSize);
 
+    // Frame-rate normalization (REVIEW-QA QA-M1): the hop is architecturally
+    // fftSize/4 (75% overlap). Rescale the per-frame temporal constants so the
+    // confirm/release/fade times in seconds match the 48 kHz-tuned reference.
+    // At exactly 48 kHz these come out identical to the Ref values.
+    const double hopSize   = static_cast<double>(std::max(1, fftSize / 4));
+    const double frameRate = sampleRate / hopSize;
+    const double ratio     = frameRate / kRefFrameRate;
+
+    confirmFrames_ = std::max(1, static_cast<int>(std::lround(kConfirmFramesRef * ratio)));
+    releaseFrames_ = std::max(1, static_cast<int>(std::lround(kReleaseFramesRef * ratio)));
+
+    // Match the per-second fade of the reference gain step:
+    // (1 - s_new)^frameRate == (1 - s_ref)^refFrameRate.
+    gainStep_ = static_cast<float>(
+        1.0 - std::pow(1.0 - static_cast<double>(kGainStepRef), kRefFrameRate / frameRate));
+
     // Lowest bins only: every bin whose centre is at or below kMaxTrackHz, plus
     // one guard bin so a peak at the edge still has a right-hand neighbour for
     // parabolic interpolation.
@@ -164,11 +180,11 @@ void LowFreqPartialTracker::updateTracks() noexcept
         if (! touched[static_cast<size_t>(t)])
             ++tr.missing;
 
-        const bool confirmed = tr.age >= kConfirmFrames && tr.missing <= kReleaseFrames;
+        const bool confirmed = tr.age >= confirmFrames_ && tr.missing <= releaseFrames_;
         const float target   = confirmed ? 1.0f : 0.0f;
-        tr.gain += (target - tr.gain) * kGainStep;
+        tr.gain += (target - tr.gain) * gainStep_;
 
-        if (tr.missing > kReleaseFrames && tr.gain < 0.01f)
+        if (tr.missing > releaseFrames_ && tr.gain < 0.01f)
             tr = Track{};   // fully faded and long gone — free the slot
     }
 }

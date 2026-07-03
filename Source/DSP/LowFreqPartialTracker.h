@@ -16,7 +16,8 @@
  * This tracker uses the signature the median ignores — temporal frequency
  * stability. A real hum holds a precise, steady frequency frame after frame
  * (recovered sub-bin via parabolic interpolation); broadband noise does not.
- * Peaks below kMaxTrackHz that stay frequency-stable for kConfirmFrames are
+ * Peaks below kMaxTrackHz that stay frequency-stable for the confirm window
+ * (~64 ms; kConfirmFramesRef frames at the 48 kHz reference frame rate) are
  * "confirmed" and produce a per-bin override that pulls the tonal mask up at
  * the partial and its skirt — so confirmed low hums leave the noise stream.
  *
@@ -62,16 +63,22 @@ public:
 
 private:
     // --- Tuning constants -----------------------------------------------------
-    static constexpr int    kMaxTracks      = 8;      // simultaneous low partials tracked
-    static constexpr double kMaxTrackHz     = 300.0;  // only track sustained tones below this
-    static constexpr double kMaxFreqDevHz   = 6.0;    // per-frame match tolerance (tolerates slow glide, rejects noise jitter)
-    static constexpr int    kConfirmFrames  = 6;      // frames of stability before a track overrides
-    static constexpr int    kReleaseFrames  = 8;      // frames a track survives with no matching peak
-    static constexpr int    kSkirtRadius    = 2;      // bins each side of a partial to override
-    static constexpr float  kProminence     = 0.10f;  // peak must exceed kProminence × strongest low peak
-    static constexpr float  kFloorFactor    = 6.0f;   // tonality gate: peak must exceed kFloorFactor × low-band median (rejects flat broadband noise)
-    static constexpr float  kGainStep       = 0.25f;  // per-frame smoothing of a track's override gain
-    static constexpr float  kEps            = 1e-12f;
+    // TEMPORAL constants (frame counts / per-frame steps) are REFERENCE values
+    // tuned at the 48 kHz / 512-hop frame rate (93.75 frames/s); prepare()
+    // rescales them to the actual frame rate so confirm/release/fade times in
+    // SECONDS are sample-rate invariant (REVIEW-QA QA-M1). At 48 kHz the
+    // rescale is the identity.
+    static constexpr double kRefFrameRate      = 48000.0 / 512.0;  // 93.75 frames/s
+    static constexpr int    kMaxTracks         = 8;      // simultaneous low partials tracked
+    static constexpr double kMaxTrackHz        = 300.0;  // only track sustained tones below this
+    static constexpr double kMaxFreqDevHz      = 6.0;    // per-frame match tolerance (tolerates slow glide, rejects noise jitter)
+    static constexpr int    kConfirmFramesRef  = 6;      // frames of stability (~64 ms) before a track overrides
+    static constexpr int    kReleaseFramesRef  = 8;      // frames (~85 ms) a track survives with no matching peak
+    static constexpr int    kSkirtRadius       = 2;      // bins each side of a partial to override
+    static constexpr float  kProminence        = 0.10f;  // peak must exceed kProminence × strongest low peak
+    static constexpr float  kFloorFactor       = 6.0f;   // tonality gate: peak must exceed kFloorFactor × low-band median (rejects flat broadband noise)
+    static constexpr float  kGainStepRef       = 0.25f;  // per-frame smoothing of a track's override gain
+    static constexpr float  kEps               = 1e-12f;
 
     struct Track
     {
@@ -87,6 +94,12 @@ private:
     double sampleRate_ = 48000.0;
     double binHz_     = 0.0;   // sampleRate / fftSize
     int    scanBins_  = 0;     // number of low bins examined for peaks
+
+    // Frame-rate-normalized temporal constants (computed in prepare() from the
+    // Ref values above; identical to them at 48 kHz / hop 512).
+    int   confirmFrames_ = kConfirmFramesRef;
+    int   releaseFrames_ = kReleaseFramesRef;
+    float gainStep_      = kGainStepRef;
 
     std::array<Track, kMaxTracks> tracks_ {};
     std::vector<float> overrideMask_;  // per-bin override [0,1], size numBins (only low band non-zero)

@@ -327,6 +327,15 @@ void UnravelAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBloc
     }
 
     updateParameters();
+
+    // Seed the per-stream gain smoothers to the resolved parameter values.
+    // Freshly-constructed smoothers sit at 0, so without this every
+    // prepareToPlay started with a ~20 ms fade-in from silence and dropped
+    // content at the very start of offline bounces (REVIEW-QA QA-H2). Seeding
+    // also lets the unity passthrough engage from the first block.
+    for (auto& processor : channelProcessors)
+        if (processor)
+            processor->snapGainSmoothers(currentTonalGain, currentNoisyGain, currentTransientGain);
 }
 
 void UnravelAudioProcessor::releaseResources()
@@ -389,12 +398,25 @@ void UnravelAudioProcessor::updateParameters() noexcept
     }
 
     // Pad-corner transient scaling: pad axes only write tonal/noisy, so
-    // unaddressed transient energy bleeds at the corners. Track transient to
-    // min(tonal, noisy) — corner ⇒ silenced, balanced ⇒ untouched. Cap at
-    // unity so a pad position with both axes above 0 dB doesn't implicitly
-    // amplify transient beyond the user's slider. Solo wins.
+    // unaddressed transient energy bleeds at the exact corners. Scale
+    // transient toward silence only as the pad NEARS a corner — the old
+    // proportional min() coupling rode every working move (a -20 dB de-noise
+    // cut consonants ~10 dB with the TRANS slider reading 0; REVIEW-UX
+    // finding 1). Knee: factor = 1 - (1-m)^16 with m = min(tonal, noisy, 1):
+    //   m = 0.5  (-6 dB pad)   -> ~0 dB    (working moves leave transients alone)
+    //   m = 0.1  (-20 dB pad)  -> -1.8 dB
+    //   m = 0.03 (-30 dB pad)  -> -8 dB
+    //   m = 0    (exact corner)-> silence  (original bleed-kill intent kept)
+    // Same design family as the spectralFloor ^4 lift below. Solo wins.
     if (! anySolo)
-        transientGain *= std::min({tonalGain, noisyGain, 1.0f});
+    {
+        const float m    = std::min({tonalGain, noisyGain, 1.0f});
+        const float inv  = 1.0f - m;
+        const float inv2 = inv * inv;
+        const float inv4 = inv2 * inv2;
+        const float inv8 = inv4 * inv4;
+        transientGain *= 1.0f - inv8 * inv8;
+    }
 
     if (muteTonal)     tonalGain     = 0.0f;
     if (muteNoise)     noisyGain     = 0.0f;
@@ -405,6 +427,13 @@ void UnravelAudioProcessor::updateParameters() noexcept
     currentTonalGain     = tonalGain;
     currentNoisyGain     = noisyGain;
     currentTransientGain = transientGain;
+
+    // Publish the EFFECTIVE transient gain (post-knee, post-solo/mute) for the
+    // UI: the fader shows the user's setting, which the pad coupling can pull
+    // down — the editor surfaces the difference so the control never lies.
+    effectiveTransientDb_.store(transientGain <= 1.0e-4f ? -60.0f
+                                                         : 20.0f * std::log10(transientGain),
+                                std::memory_order_relaxed);
 
     // Update separation parameters (0-100% -> 0-1, -100..+100 -> -1..+1)
     currentSeparation = separationPercent / 100.0f;
@@ -448,6 +477,19 @@ void UnravelAudioProcessor::updateParameters() noexcept
     }
 }
 
+// Replace NaN/Inf input samples with silence. Real-time safe: branch-per-sample
+// only, and the branch never mispredicts on healthy audio.
+static void scrubNonFinite (juce::AudioBuffer<float>& buffer, int numChannels, int numSamples) noexcept
+{
+    for (int ch = 0; ch < numChannels; ++ch)
+    {
+        float* data = buffer.getWritePointer (ch);
+        for (int i = 0; i < numSamples; ++i)
+            if (! std::isfinite (data[i]))
+                data[i] = 0.0f;
+    }
+}
+
 void UnravelAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     juce::ignoreUnused(midiMessages);
@@ -460,7 +502,14 @@ void UnravelAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     // Clear unused output channels
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
         buffer.clear(i, 0, numSamples);
-    
+
+    // Scrub non-finite input samples (REVIEW-QA QA-C1/C2): a single NaN/Inf
+    // from a misbehaving upstream plugin would otherwise pass through the
+    // unity delay line verbatim and latch permanently in the brightness IIR
+    // state and the mask-estimator envelope recurrences — output stays NaN
+    // until re-prepare. Replacing with 0 bounds the damage to the one sample.
+    scrubNonFinite(buffer, totalNumInputChannels, numSamples);
+
     // Handle bypass with HPSS processor built-in bypass
     const bool isBypassed = apvts.getRawParameterValue(ParameterIDs::bypass)->load() > 0.5f;
     
@@ -485,8 +534,13 @@ void UnravelAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
         if (channel >= static_cast<int>(channelProcessors.size()))
+        {
+            // No processor (e.g. called after releaseResources): zero rather
+            // than leak dry input at zero latency — matches the bypassed path.
+            buffer.clear(channel, 0, numSamples);
             continue;
-            
+        }
+
         auto& processor = *channelProcessors[static_cast<size_t>(channel)];
         const float* inputData = buffer.getReadPointer(channel);
         float* outputData = buffer.getWritePointer(channel);
@@ -511,8 +565,11 @@ void UnravelAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
         lastPublishedBypassed_ = isBypassed;
     }
 
-    // Apply brightness filter (post-HPSS high shelf processing)
-    if (brightnessParam_ != nullptr)
+    // Apply brightness filter (post-HPSS high shelf processing). Skipped while
+    // the Bypass parameter is engaged so the param route agrees with the host
+    // route (processBlockBypassed) — bypassed means the WHOLE plugin, EQ
+    // included (REVIEW-QA QA-H1).
+    if (!isBypassed && brightnessParam_ != nullptr)
     {
         brightnessGainSmoother_.setTargetValue(brightnessParam_->load());
 
@@ -578,6 +635,10 @@ void UnravelAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buff
     // Clear unused output channels.
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
         buffer.clear(i, 0, numSamples);
+
+    // Same non-finite scrub as processBlock: a NaN entering the delay line
+    // here would replay on un-bypass and latch downstream state (QA-C1).
+    scrubNonFinite(buffer, totalNumInputChannels, numSamples);
 
     // Route through HPSS's bypass delay so output stays PDC-aligned with
     // setLatencySamples (JUCE's default zeros output and breaks parallel routes).
@@ -727,21 +788,30 @@ void UnravelAudioProcessor::publishSpectrumSnapshot(bool bypassed) noexcept
     const juce::Span<const float> transient = bypassed ? juce::Span<const float>{} : channelProcessors[0]->getCurrentTransientMask();
     const juce::Span<const float> noise     = bypassed ? juce::Span<const float>{} : channelProcessors[0]->getCurrentNoiseMask();
 
-    const auto copyOrZero = [](std::vector<float>& dst, juce::Span<const float> src)
+    const auto copyScaledOrZero = [](std::vector<float>& dst, juce::Span<const float> src, float scale)
     {
         const size_t n = dst.size();
         if (src.size() == n)
-            std::copy(src.begin(), src.end(), dst.begin());
+            for (size_t i = 0; i < n; ++i)
+                dst[i] = src[i] * scale;
         else
             std::fill(dst.begin(), dst.end(), 0.0f);
     };
 
+    // Publish the masks scaled by the audible stream gains (capped at unity
+    // for display): a muted or attenuated stream thins/vanishes in the ribbon
+    // instead of pulsing at full detection strength while contributing no
+    // sound (REVIEW-DESIGN D2-6 — the display must not contradict the audio).
+    const float tonalVis     = juce::jmin(currentTonalGain,     1.0f);
+    const float transientVis = juce::jmin(currentTransientGain, 1.0f);
+    const float noiseVis     = juce::jmin(currentNoisyGain,     1.0f);
+
     snapSeq_.fetch_add(1, std::memory_order_release);           // -> odd: write in progress
     std::atomic_thread_fence(std::memory_order_release);
-    copyOrZero(snapMagnitudes_, mag);
-    copyOrZero(snapTonalMask_, tonal);
-    copyOrZero(snapTransientMask_, transient);
-    copyOrZero(snapNoiseMask_, noise);
+    copyScaledOrZero(snapMagnitudes_, mag, 1.0f);
+    copyScaledOrZero(snapTonalMask_, tonal, tonalVis);
+    copyScaledOrZero(snapTransientMask_, transient, transientVis);
+    copyScaledOrZero(snapNoiseMask_, noise, noiseVis);
     std::atomic_thread_fence(std::memory_order_release);
     snapSeq_.fetch_add(1, std::memory_order_release);           // -> even: stable
 }

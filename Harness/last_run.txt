@@ -6,7 +6,7 @@ Measuring blocks 120..400 (post-warmup)
   Reference full-mix energy: 1.7920e+04
   Corner                                 outEnergy  vsFull(dB)       floor
   TONAL-ONLY  (T=+0dB, N=-inf)          1.7920e+04       +0.00       1.000
-  NOISE-ONLY  (T=-inf, N=+0dB)          4.1070e-11     -146.40       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          8.6643e-11     -143.16       1.000
   FULL MIX    (T=+0dB, N=+0dB)          1.7920e+04       +0.00       0.000
   SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
 
@@ -14,7 +14,7 @@ Measuring blocks 120..400 (post-warmup)
   Reference full-mix energy: 1.2046e+04
   Corner                                 outEnergy  vsFull(dB)       floor
   TONAL-ONLY  (T=+0dB, N=-inf)          1.0950e+00      -40.41       1.000
-  NOISE-ONLY  (T=-inf, N=+0dB)          2.5891e+03       -6.68       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          1.2001e+04       -0.02       1.000
   FULL MIX    (T=+0dB, N=+0dB)          1.2046e+04       +0.00       0.000
   SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
 
@@ -22,7 +22,7 @@ Measuring blocks 120..400 (post-warmup)
   Reference full-mix energy: 5.6700e+01
   Corner                                 outEnergy  vsFull(dB)       floor
   TONAL-ONLY  (T=+0dB, N=-inf)          3.2599e-08      -92.40       1.000
-  NOISE-ONLY  (T=-inf, N=+0dB)          7.6014e-01      -18.73       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          1.7779e+00      -15.04       1.000
   FULL MIX    (T=+0dB, N=+0dB)          5.6700e+01       +0.00       0.000
   SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
 
@@ -30,15 +30,15 @@ Measuring blocks 120..400 (post-warmup)
   Reference full-mix energy: 1.1587e+04
   Corner                                 outEnergy  vsFull(dB)       floor
   TONAL-ONLY  (T=+0dB, N=-inf)          1.1340e+04       -0.09       1.000
-  NOISE-ONLY  (T=-inf, N=+0dB)          4.1111e+01      -24.50       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          2.0293e+02      -17.57       1.000
   FULL MIX    (T=+0dB, N=+0dB)          1.1587e+04       +0.00       0.000
   SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
 
 === BLEED MATRIX (separation=85%) ===
   signal           fullMix     tonalCorner(dB)     noiseCorner(dB)
-  sine440       1.7920e+04               +0.00             -146.40
-  noise         1.2046e+04              -40.41               -6.68
-  clicks        5.6700e+01              -92.40              -18.73
+  sine440       1.7920e+04               +0.00             -143.16
+  noise         1.2046e+04              -40.41               -0.02
+  clicks        5.6700e+01              -92.40              -15.04
   Interpretation: tonalCorner row 'noise'  = how much NOISE bleeds when isolating TONAL.
                   noiseCorner row 'sine440' = how much TONE bleeds when isolating NOISE.
 
@@ -46,7 +46,7 @@ Measuring blocks 120..400 (post-warmup)
   Reference full-mix energy: 1.7920e+04
   Corner                                 outEnergy  vsFull(dB)       floor
   TONAL-ONLY  (T=+0dB, N=-inf)          1.7920e+04       +0.00       1.000
-  NOISE-ONLY  (T=-inf, N=+0dB)          4.1073e-11     -146.40       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          8.6646e-11     -143.16       1.000
   FULL MIX    (T=+0dB, N=+0dB)          1.7920e+04       +0.00       0.000
   SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
 
@@ -54,7 +54,7 @@ Measuring blocks 120..400 (post-warmup)
   Reference full-mix energy: 1.2046e+04
   Corner                                 outEnergy  vsFull(dB)       floor
   TONAL-ONLY  (T=+0dB, N=-inf)          3.1410e-01      -45.84       1.000
-  NOISE-ONLY  (T=-inf, N=+0dB)          2.5968e+03       -6.66       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          1.2030e+04       -0.01       1.000
   FULL MIX    (T=+0dB, N=+0dB)          1.2046e+04       +0.00       0.000
   SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
 
@@ -62,7 +62,7 @@ Measuring blocks 120..400 (post-warmup)
   Reference full-mix energy: 5.6700e+01
   Corner                                 outEnergy  vsFull(dB)       floor
   TONAL-ONLY  (T=+0dB, N=-inf)          1.0173e-10     -117.46       1.000
-  NOISE-ONLY  (T=-inf, N=+0dB)          7.6017e-01      -18.73       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          1.7780e+00      -15.04       1.000
   FULL MIX    (T=+0dB, N=+0dB)          5.6700e+01       +0.00       0.000
   SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
 
@@ -70,15 +70,15 @@ Measuring blocks 120..400 (post-warmup)
   Reference full-mix energy: 1.1587e+04
   Corner                                 outEnergy  vsFull(dB)       floor
   TONAL-ONLY  (T=+0dB, N=-inf)          1.1302e+04       -0.11       1.000
-  NOISE-ONLY  (T=-inf, N=+0dB)          4.1274e+01      -24.48       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          2.0329e+02      -17.56       1.000
   FULL MIX    (T=+0dB, N=+0dB)          1.1587e+04       +0.00       0.000
   SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
 
 === BLEED MATRIX (separation=100%) ===
   signal           fullMix     tonalCorner(dB)     noiseCorner(dB)
-  sine440       1.7920e+04               +0.00             -146.40
-  noise         1.2046e+04              -45.84               -6.66
-  clicks        5.6700e+01             -117.46              -18.73
+  sine440       1.7920e+04               +0.00             -143.16
+  noise         1.2046e+04              -45.84               -0.01
+  clicks        5.6700e+01             -117.46              -15.04
   Interpretation: tonalCorner row 'noise'  = how much NOISE bleeds when isolating TONAL.
                   noiseCorner row 'sine440' = how much TONE bleeds when isolating NOISE.
 
@@ -86,7 +86,7 @@ Measuring blocks 120..400 (post-warmup)
   Reference full-mix energy: 1.7920e+04
   Corner                                 outEnergy  vsFull(dB)       floor
   TONAL-ONLY  (T=+0dB, N=-inf)          1.7920e+04       +0.00       1.000
-  NOISE-ONLY  (T=-inf, N=+0dB)          5.7784e-13     -164.92       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          2.5801e-12     -158.42       1.000
   FULL MIX    (T=+0dB, N=+0dB)          1.7920e+04       +0.00       0.000
   SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
 
@@ -94,7 +94,7 @@ Measuring blocks 120..400 (post-warmup)
   Reference full-mix energy: 1.2046e+04
   Corner                                 outEnergy  vsFull(dB)       floor
   TONAL-ONLY  (T=+0dB, N=-inf)          9.3748e+03       -1.09       1.000
-  NOISE-ONLY  (T=-inf, N=+0dB)          4.1168e+01      -24.66       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          2.3845e+02      -17.03       1.000
   FULL MIX    (T=+0dB, N=+0dB)          1.2046e+04       +0.00       0.000
   SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
 
@@ -102,7 +102,7 @@ Measuring blocks 120..400 (post-warmup)
   Reference full-mix energy: 5.6700e+01
   Corner                                 outEnergy  vsFull(dB)       floor
   TONAL-ONLY  (T=+0dB, N=-inf)          1.8865e+01       -4.78       1.000
-  NOISE-ONLY  (T=-inf, N=+0dB)          1.5560e-01      -25.62       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          3.6275e-01      -21.94       1.000
   FULL MIX    (T=+0dB, N=+0dB)          5.6700e+01       +0.00       0.000
   SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
 
@@ -110,21 +110,21 @@ Measuring blocks 120..400 (post-warmup)
   Reference full-mix energy: 1.1587e+04
   Corner                                 outEnergy  vsFull(dB)       floor
   TONAL-ONLY  (T=+0dB, N=-inf)          1.1536e+04       -0.02       1.000
-  NOISE-ONLY  (T=-inf, N=+0dB)          7.6868e-01      -41.78       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          4.6937e+00      -33.92       1.000
   FULL MIX    (T=+0dB, N=+0dB)          1.1587e+04       +0.00       0.000
   SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
 
 === BLEED MATRIX (separation=0%) ===
   signal           fullMix     tonalCorner(dB)     noiseCorner(dB)
-  sine440       1.7920e+04               +0.00             -164.92
-  noise         1.2046e+04               -1.09              -24.66
-  clicks        5.6700e+01               -4.78              -25.62
+  sine440       1.7920e+04               +0.00             -158.42
+  noise         1.2046e+04               -1.09              -17.03
+  clicks        5.6700e+01               -4.78              -21.94
   Interpretation: tonalCorner row 'noise'  = how much NOISE bleeds when isolating TONAL.
                   noiseCorner row 'sine440' = how much TONE bleeds when isolating NOISE.
 
 === MASK ATTRIBUTION (sep=85%, floor=1.00) ===
   Steady SINE  @ bin 19:  tonal=1.0000  transient=0.0000  noise=0.0000  (sum=1.000)
-  Steady NOISE @ bin 256:  tonal=0.0000  transient=0.0004  noise=0.9996  (sum=1.000)
+  Steady NOISE @ bin 256:  tonal=0.0000  transient=0.0000  noise=1.0000  (sum=1.000)
   SINE skirt profile (tonal mask) around peak bin 19:
     b15:0.000 b16:0.000 b17:0.000 b18:1.000 b19:1.000 b20:1.000 b21:0.000 b22:0.000 b23:0.000
   NOTE: at the NOISE-ONLY corner, the SINE's 'tonal' share is silenced but its
@@ -132,7 +132,7 @@ Measuring blocks 120..400 (post-warmup)
 
 === MASK ATTRIBUTION (sep=100%, floor=1.00) ===
   Steady SINE  @ bin 19:  tonal=1.0000  transient=0.0000  noise=0.0000  (sum=1.000)
-  Steady NOISE @ bin 256:  tonal=0.0000  transient=0.0004  noise=0.9996  (sum=1.000)
+  Steady NOISE @ bin 256:  tonal=0.0000  transient=0.0000  noise=1.0000  (sum=1.000)
   SINE skirt profile (tonal mask) around peak bin 19:
     b15:0.000 b16:0.000 b17:0.000 b18:1.000 b19:1.000 b20:1.000 b21:0.000 b22:0.000 b23:0.000
   NOTE: at the NOISE-ONLY corner, the SINE's 'tonal' share is silenced but its
@@ -140,7 +140,7 @@ Measuring blocks 120..400 (post-warmup)
 
 === MASK ATTRIBUTION (sep=85%, floor=0.00) ===
   Steady SINE  @ bin 19:  tonal=0.9997  transient=0.0000  noise=0.0003  (sum=1.000)
-  Steady NOISE @ bin 256:  tonal=0.0060  transient=0.0004  noise=0.9936  (sum=1.000)
+  Steady NOISE @ bin 256:  tonal=0.0060  transient=0.0000  noise=0.9940  (sum=1.000)
   SINE skirt profile (tonal mask) around peak bin 19:
     b15:0.025 b16:0.025 b17:0.268 b18:0.756 b19:1.000 b20:0.756 b21:0.268 b22:0.025 b23:0.025
   NOTE: at the NOISE-ONLY corner, the SINE's 'tonal' share is silenced but its
@@ -152,37 +152,37 @@ Measuring blocks 120..400 (post-warmup)
 
   A. HUM-ONLY signal — whole-signal rejection at noise corner
      full-mix energy  : 1.1648e+04
-     corner energy    : 1.9171e-02
-     rejection        : -57.84 dB
+     corner energy    : 2.1321e-02
+     rejection        : -57.37 dB
 
   B. FULL lightsaber — Goertzel HUM-FREQUENCY rejection at noise corner
      hum freqs (Hz)        : 99.61  158.20
      Goertzel power (full) : 5.6852e+03
-     Goertzel power (noise corner) : 1.7346e-02
-     TRUE hum rejection    : -55.16 dB
+     Goertzel power (noise corner) : 2.1034e-02
+     TRUE hum rejection    : -54.32 dB
 
   C. FULL lightsaber — Goertzel CRACKLE-BAND (3 kHz) at noise corner vs full
      Goertzel power (full) : 8.1647e-02
-     Goertzel power (noise corner) : 1.7265e-02
-     Crackle retention     : -6.75 dB  (expect ~0 dB = crackle kept)
+     Goertzel power (noise corner) : 8.0739e-02
+     Crackle retention     : -0.05 dB  (expect ~0 dB = crackle kept)
 
   D. FULL lightsaber — WHOLE-SIGNAL rejection at noise corner (−21 dB baseline)
      whole-signal full-mix energy  : 1.1587e+04
-     whole-signal corner energy    : 4.1111e+01
-     whole-signal rejection        : -24.50 dB
+     whole-signal corner energy    : 2.0293e+02
+     whole-signal rejection        : -17.57 dB
 
   SUMMARY
   -------
-  Hum-only whole-signal rejection : -57.84 dB
-  Full saber HUM Goertzel rejection: -55.16 dB  <- true hum bleed
-  Full saber CRACKLE retention     : -6.75 dB  <- should be ~0 dB
-  Full saber WHOLE-signal          : -24.50 dB  <- the original number
+  Hum-only whole-signal rejection : -57.37 dB
+  Full saber HUM Goertzel rejection: -54.32 dB  <- true hum bleed
+  Full saber CRACKLE retention     : -0.05 dB  <- should be ~0 dB
+  Full saber WHOLE-signal          : -17.57 dB  <- the original number
 ================================================================
   [PASS] mask reconciler: band=1.000 far=0.000 inBounds=1
   [PASS] harmonic detector: peak tonal=1.000 off-peak=0.065
-  [PASS] computeMasksWithTonal: maxSumErr=5.96e-08  tonal@band=1.000
+  [PASS] computeMasksWithTonal: maxSumErr=0.00e+00  tonal@band=1.000
   [PASS] analysisOnly magnitude peak at expected bin
-  [PASS] low-freq tracker: steady(min over 44.1/48/96k)=1.000 (want>0.8)  jitter=0.000 (want<0.1)
+  [PASS] low-freq tracker: steady(min over 44.1/48/96k)=0.985 (want>0.8)  jitter=0.000 (want<0.1)
 
 === REPORTED LATENCY vs MEASURED (per block size) ===
   [PASS] block   64: reported 2048, measured 2048, peak +0.9793 | dropout scan min window -0.56 dB
@@ -197,15 +197,21 @@ Measuring blocks 120..400 (post-warmup)
   [PASS] no dropout after unity exit: min 10ms window -0.80 dB vs unity (want >= -6 dB)
 
 === ISOLATION TARGETS (separation=85%) ===
-  [PASS] sine @ noise corner (tonal rejection)       -146.40 dB  (target <= -50 dB)
-  [PASS] hum  @ noise corner (hum rejection)          -57.84 dB  (target <= -50 dB)
+  [PASS] sine @ noise corner (tonal rejection)       -143.16 dB  (target <= -50 dB)
+  [PASS] hum  @ noise corner (hum rejection)          -57.43 dB  (target <= -50 dB)
   [PASS] noise @ tonal corner (noise rejection)       -47.80 dB  (target <= -40 dB)
   [PASS] clicks @ tonal corner (click rejection)      -92.40 dB  (target <= -40 dB)
 
 === ISOLATION TARGETS (separation=100%) ===
-  [PASS] sine @ noise corner (tonal rejection)       -146.40 dB  (target <= -50 dB)
-  [PASS] hum  @ noise corner (hum rejection)          -52.66 dB  (target <= -50 dB)
+  [PASS] sine @ noise corner (tonal rejection)       -143.16 dB  (target <= -50 dB)
+  [PASS] hum  @ noise corner (hum rejection)          -52.37 dB  (target <= -50 dB)
   [PASS] noise @ tonal corner (noise rejection)       -54.35 dB  (target <= -40 dB)
   [PASS] clicks @ tonal corner (click rejection)     -117.46 dB  (target <= -40 dB)
+
+=== ISOLATION ACROSS SAMPLE RATES (separation=85%) ===
+  [PASS] SR= 44100: hum reject  -53.73 dB (<= -40) | hum keep  -0.00 dB (> -3) | noise reject  -47.04 dB (<= -40)
+  [PASS] SR= 88200: hum reject  -68.60 dB (<= -40) | hum keep  -0.00 dB (> -3) | noise reject  -59.39 dB (<= -40)
+  [PASS] SR= 96000: hum reject  -68.78 dB (<= -40) | hum keep  -0.00 dB (> -3) | noise reject  -60.92 dB (<= -40)
+  [PASS] SR=192000: hum reject  -71.88 dB (<= -40) | hum keep  -0.00 dB (> -3) | noise reject  -70.49 dB (<= -40)
 
 ALL ISOLATION TARGETS MET.

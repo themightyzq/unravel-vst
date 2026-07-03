@@ -13,6 +13,13 @@ HPSSProcessor::HPSSProcessor(bool lowLatency)
     tonalGainSmoother_.reset(48000.0, 0.02);      // 20ms ramp time
     noiseGainSmoother_.reset(48000.0, 0.02);      // 20ms ramp time
     transientGainSmoother_.reset(48000.0, 0.02);  // 20ms ramp time
+
+    // Seed at unity, not 0: a default-constructed SmoothedValue sits at 0, so
+    // the first ~20 ms after construction/prepare faded in from silence and an
+    // impulse in the very first block was dropped entirely (REVIEW-QA QA-H2).
+    // Unity is the transparent default; the host layer snaps to the real
+    // parameter values right after prepare.
+    snapGainSmoothers(1.0f, 1.0f, 1.0f);
 }
 
 HPSSProcessor::~HPSSProcessor() = default;
@@ -24,13 +31,18 @@ HPSSProcessor::~HPSSProcessor() = default;
 void HPSSProcessor::prepare(double sampleRate, int maxBlockSize) noexcept
 {
     currentSampleRate_ = sampleRate;
-    currentBlockSize_ = maxBlockSize;
+    // Floor at 1: a degenerate prepare(sr, 0) would otherwise make the
+    // oversized-block chunk loop in processBlock spin forever.
+    currentBlockSize_ = std::max(1, maxBlockSize);
 
-    // Configure parameter smoothers for current sample rate (20ms for responsive controls)
+    // Configure parameter smoothers for current sample rate (20ms for
+    // responsive controls) and seed at unity so there is no fade-in from
+    // silence after prepare (QA-H2); the host layer snaps real values next.
     tonalGainSmoother_.reset(sampleRate, 0.02);
     noiseGainSmoother_.reset(sampleRate, 0.02);
     transientGainSmoother_.reset(sampleRate, 0.02);
-    
+    snapGainSmoothers(1.0f, 1.0f, 1.0f);
+
     // Initialize all components
     initializeComponents();
     
@@ -63,10 +75,12 @@ void HPSSProcessor::reset() noexcept
     if (maskEstimator_)
         maskEstimator_->reset();
     
-    // Reset parameter smoothers (20ms for responsive controls)
+    // Reset parameter smoothers (20ms for responsive controls), seeded at
+    // unity for the same no-fade-in reason as prepare() (QA-H2).
     tonalGainSmoother_.reset(currentSampleRate_, 0.02);
     noiseGainSmoother_.reset(currentSampleRate_, 0.02);
     transientGainSmoother_.reset(currentSampleRate_, 0.02);
+    snapGainSmoothers(1.0f, 1.0f, 1.0f);
     
     // Clear buffers
     std::fill(tonalMaskBuffer_.begin(), tonalMaskBuffer_.end(), 0.0f);
@@ -87,7 +101,23 @@ void HPSSProcessor::processBlock(const float* inputBuffer,
     jassert(isInitialized_);
     jassert(inputBuffer != nullptr);
     jassert(outputBuffer != nullptr);
-    jassert(numSamples > 0 && numSamples <= currentBlockSize_);
+
+    // Hosts may legally send zero-sample blocks (VST3 parameter flushes).
+    if (numSamples <= 0)
+        return;
+
+    // Blocks larger than the prepared maximum would overrun the delay line
+    // and starve the output ring (silent corruption in release builds —
+    // REVIEW-QA QA-M2). Process in prepared-size chunks instead; bounded by
+    // numSamples/currentBlockSize_ iterations.
+    while (numSamples > currentBlockSize_)
+    {
+        processBlock(inputBuffer, outputBuffer, currentBlockSize_,
+                     tonalGain, noiseGain, transientGain);
+        inputBuffer  += currentBlockSize_;
+        outputBuffer += currentBlockSize_;
+        numSamples   -= currentBlockSize_;
+    }
 
     // Always feed the latency-matched delay line, whatever path produces the
     // output. This keeps its history real, so entering bypass (or the unity
@@ -323,9 +353,14 @@ void HPSSProcessor::initializeComponents() noexcept
     maskEstimator_ = std::make_unique<MaskEstimator>();
     maskEstimator_->prepare(numBins_, currentSampleRate_);
 
-    // Apply current separation parameters
+    // Apply current separation parameters. spectralFloor_ must be re-applied
+    // too: the estimator was just recreated, so any floor set before prepare()
+    // would otherwise silently reset to 0 while separation/focus survived
+    // (REVIEW-QA QA-M1 — the corner-isolation floor never took effect when a
+    // caller configured the processor before preparing it).
     maskEstimator_->setSeparation(separation_);
     maskEstimator_->setFocus(focus_);
+    maskEstimator_->setSpectralFloor(spectralFloor_);
 
     // Resize mask buffers for new bin count (critical when switching quality modes)
     tonalMaskBuffer_.resize(static_cast<size_t>(numBins_), 0.0f);

@@ -59,9 +59,18 @@ ResolvedParams resolveParams (float tonalDb, float noiseDb, float transientDb,
 
     const bool anySolo = false; // harness never solos
 
-    // Pad-corner transient scaling (PluginProcessor.cpp ~L394-395)
+    // Pad-corner transient knee (PluginProcessor.cpp updateParameters):
+    // factor = 1 - (1-m)^16, m = min(tonal, noisy, 1). Mirrors the shipping
+    // code exactly — silences transient at the exact corners only.
     if (! anySolo)
-        transientGain *= std::min ({ tonalGain, noiseGain, 1.0f });
+    {
+        const float m    = std::min ({ tonalGain, noiseGain, 1.0f });
+        const float inv  = 1.0f - m;
+        const float inv2 = inv * inv;
+        const float inv4 = inv2 * inv2;
+        const float inv8 = inv4 * inv4;
+        transientGain *= 1.0f - inv8 * inv8;
+    }
 
     // Pad-asymmetry spectralFloor lift (PluginProcessor.cpp ~L426-433)
     const float maxPadGain = std::max (tonalGain, noiseGain);
@@ -888,6 +897,101 @@ bool checkUnityTransition()
     return stepOk && dipOk;
 }
 
+// -------------------------------------------------------------------------
+// Isolation across sample rates (REVIEW-QA QA-M1 regression gate).
+// The primary isolation targets above run only at kSR = 48 kHz — the rate the
+// DSP was tuned at. Mask/tracker temporal constants are frame-rate normalized
+// in prepare(), and the spectralFloor must survive prepare(); this check pins
+// both across the SR matrix with a slim corner check per rate:
+//   - 100 Hz hum REJECTED at the noise corner  (<= -40 dB, the §E.5 gate)
+//   - 100 Hz hum KEPT at the tonal corner      (> -3 dB)
+//   - broadband noise REJECTED at the tonal corner (<= -40 dB)
+// Self-contained: generates its own per-rate signals (kSR-based helpers above
+// don't apply) and mirrors the plugin's corner math via resolveParams().
+// -------------------------------------------------------------------------
+static bool checkIsolationAcrossSampleRates()
+{
+    std::printf ("\n=== ISOLATION ACROSS SAMPLE RATES (separation=85%%) ===\n");
+
+    static constexpr float  sep01     = 0.85f;
+    static constexpr int    block     = 512;
+    static constexpr double settleSec = 3.0;   // let medians/trackers/smoothers settle
+    static constexpr double totalSec  = 5.0;   // measure settle..total
+
+    const double rates[] = { 44100.0, 88200.0, 96000.0, 192000.0 };
+    bool allOk = true;
+
+    // Post-settle output energy of `sig` through a fresh processor at `sr`
+    // with resolved corner params. Signal loops if shorter than the run.
+    auto energyAt = [] (double sr, const std::vector<float>& sig,
+                        const ResolvedParams& p) -> double
+    {
+        HPSSProcessor proc (false);
+        proc.prepare (sr, block);
+        proc.setSeparation (sep01);
+        proc.setFocus (0.0f);
+        proc.setSpectralFloor (p.spectralFloor);
+
+        const int numBlocks    = static_cast<int> (sr * totalSec)  / block;
+        const int settleBlocks = static_cast<int> (sr * settleSec) / block;
+
+        std::vector<float> in ((size_t) block, 0.0f), out ((size_t) block, 0.0f);
+        size_t readPos = 0;
+        double energy = 0.0;
+
+        for (int b = 0; b < numBlocks; ++b)
+        {
+            for (int i = 0; i < block; ++i)
+            {
+                in[(size_t) i] = sig[readPos % sig.size()];
+                ++readPos;
+            }
+            proc.processBlock (in.data(), out.data(), block,
+                               p.tonalGain, p.noiseGain, p.transientGain);
+            if (b >= settleBlocks)
+                for (int i = 0; i < block; ++i)
+                    energy += (double) out[(size_t) i] * out[(size_t) i];
+        }
+        return energy;
+    };
+
+    const ResolvedParams full        = resolveParams (0.0f,   0.0f,  0.0f, 0.0f);
+    const ResolvedParams noiseCorner = resolveParams (-60.0f, 0.0f,  0.0f, 0.0f);
+    const ResolvedParams tonalCorner = resolveParams (0.0f, -60.0f,  0.0f, 0.0f);
+
+    for (double sr : rates)
+    {
+        // 100 Hz hum: a 1 s buffer holds exactly 100 cycles at any integer SR,
+        // so looping it is seamless.
+        std::vector<float> hum ((size_t) sr);
+        for (size_t n = 0; n < hum.size(); ++n)
+            hum[n] = 0.4f * (float) std::sin (2.0 * M_PI * 100.0 * (double) n / sr);
+
+        // Broadband noise spanning the whole run (no loop), as in
+        // checkIsolationTargets: a short looped noise buffer is periodic and
+        // its low-harmonic comb would legitimately read as tonal.
+        std::vector<float> noise ((size_t) (sr * totalSec));
+        {
+            juce::Random rng ((juce::int64) 1234);
+            for (auto& s : noise) s = 0.5f * (rng.nextFloat() * 2.0f - 1.0f);
+        }
+
+        const double humFull   = energyAt (sr, hum,   full);
+        const double humRejDb  = toDb (energyAt (sr, hum, noiseCorner) / std::max (humFull, 1e-30));
+        const double humKeepDb = toDb (energyAt (sr, hum, tonalCorner) / std::max (humFull, 1e-30));
+
+        const double noiseFull  = energyAt (sr, noise, full);
+        const double noiseRejDb = toDb (energyAt (sr, noise, tonalCorner) / std::max (noiseFull, 1e-30));
+
+        const bool ok = humRejDb <= -40.0 && humKeepDb > -3.0 && noiseRejDb <= -40.0;
+        allOk = allOk && ok;
+
+        std::printf ("  [%s] SR=%6.0f: hum reject %+7.2f dB (<= -40) | hum keep %+6.2f dB (> -3) | noise reject %+7.2f dB (<= -40)\n",
+                     ok ? "PASS" : "FAIL", sr, humRejDb, humKeepDb, noiseRejDb);
+    }
+    return allOk;
+}
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI juceInit; // for message-thread-free JUCE bits
@@ -928,6 +1032,7 @@ int main()
     targetsOk &= checkUnityTransition();
     targetsOk &= checkIsolationTargets (85.0f);
     targetsOk &= checkIsolationTargets (100.0f);
+    targetsOk &= checkIsolationAcrossSampleRates();
 
     std::printf ("\n%s\n", targetsOk ? "ALL ISOLATION TARGETS MET."
                                      : "ISOLATION TARGETS NOT MET (expected pre-implementation).");

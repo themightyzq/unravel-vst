@@ -8,7 +8,8 @@
  * MaskEstimator - Core HPSS algorithm for harmonic-percussive source separation
  *
  * Implements high-performance tonal/noise separation using:
- * 1. HPSS with horizontal median (9 time frames) + vertical median (13 frequency bins)
+ * 1. HPSS with horizontal median (~96 ms of time frames; 9 at 48 kHz/hop 512,
+ *    frame-rate normalized in prepare()) + vertical median (13 frequency bins)
  * 2. Spectral flux for transient detection
  * 3. Spectral flatness measure (SFM) for harmonic content analysis
  * 4. Advanced post-processing with temporal smoothing + frequency blur
@@ -134,7 +135,17 @@ public:
 
 private:
     // Core HPSS algorithm parameters (as per specification)
-    static constexpr int horizontalMedianSize = 9;   // 9 time frames for harmonic enhancement
+    //
+    // TEMPORAL constants are expressed as REFERENCE values tuned at the
+    // 48 kHz / 512-hop frame rate (93.75 frames/s). prepare() rescales them to
+    // the actual frame rate (sampleRate / hop, hop = fftSize/4 = (numBins-1)/2)
+    // so the effective time windows in SECONDS are sample-rate invariant
+    // (REVIEW-QA QA-M1: per-frame constants halved their time windows at
+    // 88.2/96 kHz because the frame rate doubles). At exactly 48 kHz the
+    // rescale is the identity, preserving the tuned behaviour bit-for-bit.
+    static constexpr double refFrameRate = 48000.0 / 512.0;  // 93.75 frames/s
+    static constexpr int horizontalMedianFramesRef = 9;  // 9 time frames (~96 ms) for harmonic enhancement
+    static constexpr int maxHorizontalMedianFrames = 64; // allocation cap (192 kHz -> 36 frames; guard beyond)
     static constexpr int verticalMedianSize = 13;    // 13 frequency bins for percussive enhancement
     static constexpr float eps = 1e-8f;              // Numerical stability epsilon
     
@@ -143,21 +154,56 @@ private:
     static constexpr float fluxWeight = 0.25f;       // β: Spectral flux weight
     static constexpr float flatnessWeight = 0.15f;   // γ: Spectral flatness weight
     
-    // Post-processing parameters
-    static constexpr float attackAlpha = 0.5f;       // Fast attack for transient preservation
-    static constexpr float releaseAlpha = 0.15f;    // Slow release to reduce pumping
-    static constexpr int blurRadius = 1;             // Frequency blur radius (±1 bin)
+    // Post-processing parameters (reference per-frame alphas at refFrameRate;
+    // see the temporal-constants note above)
+    static constexpr float attackAlphaRef = 0.5f;     // Fast attack for transient preservation
+    static constexpr float releaseAlphaRef = 0.15f;   // Slow release to reduce pumping
+    static constexpr int blurRadius = 1;              // Frequency blur radius (±1 bin)
 
     // Transient-stream envelope follower (acts on the non-tonal residual).
     // Fast attack so onsets immediately flag as transient; slow release so the
     // post-onset energy gradually flows back into the Noise stream.
-    static constexpr float transientAttack  = 0.8f;  // Near-instant rise on a flux spike
-    static constexpr float transientRelease = 0.12f; // ~10 frames (~100 ms at hop 512/48k)
-    
+    static constexpr float transientAttackRef  = 0.8f;  // Near-instant rise on a flux spike
+    static constexpr float transientReleaseRef = 0.12f; // ~10 frames (~100 ms at hop 512/48k)
+
+    // Frame-level onset gate on the transient stream (REVIEW-UX finding 7 /
+    // backlog A29-H9+H16). STEADY broadband noise has persistently high
+    // PER-BIN spectral flux (its bin magnitudes fluctuate frame to frame),
+    // which used to hold the transient envelope open and route the steady bed
+    // into the Transient stream — making the transient fader a hiss fader and
+    // capping de-noise depth. The gate compares each frame's MEAN half-wave
+    // (rising) flux against a slow running baseline of itself: a steady bed
+    // sits AT its own baseline (ratio ~1, gate closed, bed decays into the
+    // Noise stream), while a real onset — click, hit, plosive — spikes the
+    // frame-wide rising flux far above baseline and opens the gate. Ratios
+    // are dimensionless, so the gate is level- and sample-rate-independent;
+    // the baseline alphas are frame-rate normalized in prepare().
+    static constexpr float onsetGateOpenRatio   = 1.5f;  // gate starts opening at 1.5x baseline
+    static constexpr float onsetGateFullRatio   = 2.5f;  // fully open at 2.5x baseline
+    static constexpr float onsetBaselineRiseRef = 0.06f; // slow rise (onset spikes barely lift it)
+    static constexpr float onsetBaselineFallRef = 0.15f; // faster fall toward quieter beds
+    static constexpr float onsetBaselineFloor   = 1.0e-3f; // ratio stays finite out of silence
+
     // State variables
     bool isInitialized = false;
     int numBins = 0;
     double sampleRate = 48000.0;
+
+    // Frame-rate-normalized temporal constants (computed in prepare() from the
+    // Ref values above; identical to them at 48 kHz / hop 512).
+    int horizontalMedianFrames_ = horizontalMedianFramesRef;
+    float attackAlpha_ = attackAlphaRef;
+    float releaseAlpha_ = releaseAlphaRef;
+    float transientAttack_ = transientAttackRef;
+    float transientRelease_ = transientReleaseRef;
+    float onsetBaselineRise_ = onsetBaselineRiseRef;
+    float onsetBaselineFall_ = onsetBaselineFallRef;
+
+    // Onset-gate state (updated once per frame in computeSpectralFlux()).
+    // Baseline starts at the flux ceiling (1.0) so the gate opens only after
+    // the baseline has settled onto the programme's own steady flux level.
+    float onsetOdfBaseline_ = 1.0f;
+    float onsetGate_ = 0.0f;
 
     // User-controllable parameters
     float separationAmount = 0.75f;       // 0-1: How aggressively to separate (default 75%)
@@ -166,34 +212,35 @@ private:
     
     // Magnitude history for HPSS (fixed ring buffer for time frames)
     // Stored as flat contiguous array: [frame0_bin0, frame0_bin1, ..., frame1_bin0, ...]
+    // Sized in prepare() for horizontalMedianFrames_ at the prepared rate.
     std::vector<float> magnitudeHistoryData;
     int historyWriteIndex = 0;  // Points to next frame to write (oldest frame)
-    int framesReceived = 0;     // Track how many valid frames we have (0 to horizontalMedianSize)
+    int framesReceived = 0;     // Track how many valid frames we have (0 to horizontalMedianFrames_)
 
     // Helper to access magnitude history
     inline float* getHistoryFrame(int frameIndex) noexcept
     {
-        // frameIndex 0 = oldest, horizontalMedianSize-1 = newest (before current write)
-        const int actualIndex = (historyWriteIndex + frameIndex) % horizontalMedianSize;
+        // frameIndex 0 = oldest, horizontalMedianFrames_-1 = newest (before current write)
+        const int actualIndex = (historyWriteIndex + frameIndex) % horizontalMedianFrames_;
         return magnitudeHistoryData.data() + (actualIndex * numBins);
     }
 
     inline const float* getHistoryFrame(int frameIndex) const noexcept
     {
-        const int actualIndex = (historyWriteIndex + frameIndex) % horizontalMedianSize;
+        const int actualIndex = (historyWriteIndex + frameIndex) % horizontalMedianFrames_;
         return magnitudeHistoryData.data() + (actualIndex * numBins);
     }
 
     inline float* getCurrentFrame() noexcept
     {
         // Current frame is the one just before write index (most recently written)
-        const int currentIndex = (historyWriteIndex + horizontalMedianSize - 1) % horizontalMedianSize;
+        const int currentIndex = (historyWriteIndex + horizontalMedianFrames_ - 1) % horizontalMedianFrames_;
         return magnitudeHistoryData.data() + (currentIndex * numBins);
     }
 
     inline const float* getCurrentFrame() const noexcept
     {
-        const int currentIndex = (historyWriteIndex + horizontalMedianSize - 1) % horizontalMedianSize;
+        const int currentIndex = (historyWriteIndex + horizontalMedianFrames_ - 1) % horizontalMedianFrames_;
         return magnitudeHistoryData.data() + (currentIndex * numBins);
     }
     
@@ -300,14 +347,18 @@ private:
     
     /**
      * Safe clamping to [0, 1] range with denormal protection.
+     * NaN-safe: a NaN input returns 0 (both ordered comparisons below are
+     * false for NaN, so it falls through to the final return). The previous
+     * formulation was NaN-transparent, which let inf/inf flux poison the
+     * transient-envelope recurrence permanently (REVIEW-QA QA-C2).
      * @param value Input value
-     * @return Clamped value
+     * @return Clamped value in [0, 1]; 0 for NaN
      */
     inline float clamp01(float value) const noexcept
     {
-        if (value <= 0.0f) return 0.0f;
         if (value >= 1.0f) return 1.0f;
-        return value;
+        if (value > 0.0f) return value;
+        return 0.0f;   // <= 0, or NaN
     }
     
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MaskEstimator)
