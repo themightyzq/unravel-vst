@@ -13,6 +13,9 @@ Unravel is a real-time audio plugin that splits a sound into three streams — *
 - **Spectrum Visualization** — three-color stacked ribbon shows the actual per-frequency split (LOG / LIN axis).
 - **Sound Design Presets** — general (Default, Gentle Separation), isolation (Extract Tonal, Extract Noise), and material-specific starting points (Dialogue De-noise, Ambience Rescue, Tame Transients, Transient Punch), each setting the full state across all three streams.
 - **Solo / Mute per stream** — additive solo (standard DAW behavior), mute overrides solo.
+- **Meters** — per-stream level bars, output RMS/peak with peak-hold, and a limiter indicator.
+- **Wet/Dry Mix** — phase-coherent parallel blend against the latency-aligned original.
+- **A/B compare + undo** — two settings slots in the header; Cmd-Z / Shift-Cmd-Z undoes parameter edits.
 - **Full Automation** — every parameter is DAW-automatable.
 - **Latency** — ~43 ms at 48 kHz (2048 samples), reported to the host for automatic delay compensation; block-size invariant, so PDC alignment is exact at any host buffer size.
 

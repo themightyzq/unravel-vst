@@ -69,7 +69,28 @@ public:
     // not safe to mutate from the message thread while processBlock runs.
     void requestParameterStateSnap() noexcept;
 
+    // === Undo (message thread) — APVTS parameter edits are undoable; the
+    // editor maps Cmd-Z / Shift-Cmd-Z here.
+    juce::UndoManager& getUndoManager() noexcept { return undoManager_; }
+
+    // === A/B compare (message thread only). Two full-state slots; toggling
+    // stores the current state into the active slot and recalls the other
+    // (first toggle to an empty slot copies the current state = no change).
+    bool isSlotB() const noexcept { return currentSlotIsB_; }
+    void toggleAB();
+
+    // === Metering (audio thread writes; UI reads; relaxed atomics). The
+    // per-stream values are relayed from channel 0's HPSS inside processBlock
+    // so the UI never touches channelProcessors (which prepareToPlay rebuilds).
+    float getOutputRms()     const noexcept { return outputRms_.load(std::memory_order_relaxed); }
+    float getOutputPeak()    const noexcept { return outputPeak_.load(std::memory_order_relaxed); }
+    float getMeterTonal()    const noexcept { return meterTonal_.load(std::memory_order_relaxed); }
+    float getMeterNoise()    const noexcept { return meterNoise_.load(std::memory_order_relaxed); }
+    float getMeterTransient()const noexcept { return meterTransient_.load(std::memory_order_relaxed); }
+    bool  consumeLimiterEngaged() noexcept  { return limiterEngaged_.exchange(false, std::memory_order_relaxed); }
+
 private:
+    juce::UndoManager undoManager_;   // declared before apvts (apvts holds a pointer to it)
     juce::AudioProcessorValueTreeState apvts;
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     
@@ -89,6 +110,26 @@ private:
     float currentSeparation = 0.75f;
     float currentFocus = 0.0f;
     float currentSpectralFloor = 0.0f;  // Default OFF
+
+    // Wet/dry mix (1 = fully wet). Smoothed per sample during ramps; the dry
+    // signal is each channel's latency-aligned delay line (readDelayedDry).
+    std::atomic<float>* mixParam_ = nullptr;
+    juce::SmoothedValue<float> mixSmoother_;
+    std::vector<float> dryScratch_;     // sized maxBlockSize in prepareToPlay
+    std::vector<float> mixScratch_;     // per-sample mix curve while ramping
+
+    // A/B slots (message thread only)
+    juce::ValueTree slotA_, slotB_;
+    bool currentSlotIsB_ = false;
+
+    // Meters (post-everything output + relayed per-stream levels; audio
+    // thread writes, relaxed)
+    std::atomic<float> outputRms_      { 0.0f };
+    std::atomic<float> outputPeak_     { 0.0f };
+    std::atomic<float> meterTonal_     { 0.0f };
+    std::atomic<float> meterNoise_     { 0.0f };
+    std::atomic<float> meterTransient_ { 0.0f };
+    std::atomic<bool>  limiterEngaged_ { false };
 
     // Solo/Mute state (per stream)
     bool soloTonal = false;
@@ -116,6 +157,8 @@ private:
     std::vector<juce::dsp::IIR::Coefficients<float>::Ptr> brightnessCoeffTable_;
 
     void updateParameters() noexcept;
+    void updateOutputMeter(const juce::AudioBuffer<float>& buffer,
+                           int numChannels, int numSamples) noexcept;
     void rebuildBrightnessTable(double sampleRate);
     int brightnessTableIndex(float gainDb) const noexcept;
 

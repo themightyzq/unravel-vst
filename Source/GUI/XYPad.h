@@ -68,7 +68,7 @@ private:
     static constexpr float kZeroDbNorm = (0.0f - kMinDb) / kDbRange;  // 0dB position in normalized space
 
     // Visual settings
-    static constexpr float thumbSize = 20.0f;
+    static constexpr float thumbSize = 26.0f;  // large enough to read as the grabbable handle (D2-7)
     static constexpr float gridLineOpacity = 0.2f;
     static constexpr int gridDivisions = 8;
     

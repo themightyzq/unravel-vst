@@ -16,7 +16,7 @@ For install / first-run setup, see also [README.md](../README.md#installation).
 
 ## What each control does
 
-The plugin has an XY pad (Tonal × Noise), a vertical Transient fader, four processing knobs, three pairs of Solo / Mute buttons, a Preset menu, and a Bypass button. Here's what each one actually does to your sound.
+The plugin has an XY pad (Tonal × Noise), a vertical Transient fader with a meter rail beside it, five processing knobs, three pairs of Solo / Mute buttons, a Preset menu, an A/B compare toggle, and a Bypass button. Here's what each one actually does to your sound.
 
 ### The XY pad — Tonal × Noise
 
@@ -60,6 +60,18 @@ A gating threshold for "extreme isolation." At 0 (default = OFF) the two compone
 
 A high-shelf EQ at ~4 kHz applied to the final output. Positive opens up the treble; negative softens it. Zero is bypass.
 
+### Mix (0 – 100 %)
+
+Wet/dry blend, applied after everything else (separation, gains, brightness). The dry side is the **latency-aligned original**, so any blend is phase-coherent — parallel processing without comb filtering. 100 % (default) is fully processed; 50 % is a classic parallel-restoration blend; 0 % is effectively the original signal (delayed by the plugin's fixed latency).
+
+### Meters (between the pad and the Transient fader)
+
+Four thin bars: tonal (blue), noise (orange), transient (yellow) — each showing that stream's post-gain level — plus the output (teal) with a peak-hold tick. The red strip at the top lights when the built-in safety limiter engages (output approaching full scale — back something off). Levels are approximate, referenced to full scale.
+
+### A/B compare (header, next to Bypass)
+
+Two settings slots. The button shows the slot you're **on**; clicking stores your current settings into it and switches to the other. First press copies the current sound over (so nothing changes audibly) — tweak, then toggle to compare. **Cmd-Z / Shift-Cmd-Z** (Ctrl on Windows/Linux) undoes and redoes parameter edits while the editor has keyboard focus.
+
 ### Solo / Mute (per stream)
 
 Three Solo / Mute pairs along the footer (TONAL / NOISE / TRANS), each with the matching colour. Standard DAW-style additive solo:
@@ -75,7 +87,7 @@ A loader, not a "current state" indicator — pick one to apply its full setting
 
 **General**
 - **Default** — neutral / reset (all three streams at 0 dB, 85 % separation, no focus, no floor, no brightness shift).
-- **Gentle Separation** — subtle blending (low separation, all three streams pass).
+- **Gentle Separation** — a mild wideband de-noise (noise −6 dB) at soft separation. (It used to leave all gains at unity — audibly identical to the input, which read as "broken".)
 
 **Isolate**
 - **Extract Tonal** — isolate harmonic content (mutes both Noise and Transient streams, strong separation, focus biased tonal).

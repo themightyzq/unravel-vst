@@ -117,7 +117,7 @@ void SpectrumDisplay::paint(juce::Graphics& g)
 
     if (!isEnabled)
     {
-        g.setColour(juce::Colour(0xff666666));
+        g.setColour(Theme::textDim.darker(0.3f));
         g.setFont(juce::FontOptions(Theme::fontLabel));
         g.drawText("Spectrum Display", getLocalBounds(), juce::Justification::centred);
         return;
@@ -306,7 +306,7 @@ void SpectrumDisplay::drawLabels(juce::Graphics& g)
     auto bounds = getLocalBounds().toFloat();
     const float height = bounds.getHeight();
 
-    g.setColour(juce::Colour(0xff888888));  // Improved contrast
+    g.setColour(Theme::textDim);
     g.setFont(juce::FontOptions(10.0f));    // Minimum readable size
 
     // dB labels on right side — same dbToY mapping as the grid lines in
@@ -326,17 +326,17 @@ void SpectrumDisplay::drawLabels(juce::Graphics& g)
 
     g.setColour(tonalColour.withAlpha(1.0f));
     g.fillRect(5, legendY, 8, 8);
-    g.setColour(juce::Colour(0xff888888));
+    g.setColour(Theme::textDim);
     g.drawText("Tonal", 15, legendY - 1, 50, 12, juce::Justification::left);
 
     g.setColour(transientColour.withAlpha(1.0f));
     g.fillRect(60, legendY, 8, 8);
-    g.setColour(juce::Colour(0xff888888));
+    g.setColour(Theme::textDim);
     g.drawText("Transient", 70, legendY - 1, 60, 12, juce::Justification::left);
 
     g.setColour(noiseColour.withAlpha(1.0f));
     g.fillRect(130, legendY, 8, 8);
-    g.setColour(juce::Colour(0xff888888));
+    g.setColour(Theme::textDim);
     g.drawText("Noise", 140, legendY - 1, 50, 12, juce::Justification::left);
 
     // Draw frequency labels
@@ -349,7 +349,7 @@ void SpectrumDisplay::drawFrequencyLabels(juce::Graphics& g)
     const float width = static_cast<float>(bounds.getWidth());
     const int labelY = bounds.getHeight() - 14;
 
-    g.setColour(juce::Colour(0xff888888));  // Consistent contrast
+    g.setColour(Theme::textDim);
     g.setFont(juce::FontOptions(10.0f));    // Minimum readable size
 
     // Musical frequency markers, positioned with the same freqToX mapping the

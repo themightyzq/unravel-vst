@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added (feature + engine completion, 2026-07-03)
+
+- **Low male dialogue now isolates like everything else.** Dense harmonic combs (f0 ≲ 200 Hz — exactly the male dialogue register) used to defeat the separation: with partials closer than ~8 bins, every partial's median window is filled with its neighbours' skirts, so the whole comb classified as noise and voice retained at only −11 dB in the extracted noise. The low-frequency partial tracker now extends each confirmed sub-300 Hz fundamental to its verified harmonics (up to 2 kHz, four per-frame gates, magnitude-conditional skirts). Voice retention: **−11 dB → −54 dB**; hum handling and every existing gate byte-identical; new permanent harness gate (10-partial 147 Hz voice + hiss bed: voice ≤ −35 dB AND the bed stays).
+- **MIX (wet/dry) knob.** Blends the processed sound with the latency-aligned original (the same delay line the bypass path uses), applied after everything including the brightness shelf — phase-coherent parallel processing with no comb filtering. Presets reset it to 100 %.
+- **Meters.** A compact rail between the pad and the TRANS fader: per-stream level bars in the stream colours, an output bar with RMS + peak-hold, and a limiter LED that lights when the built-in safety limiter engages. Computed inside the existing mask loop (no extra DSP pass) and relayed to the UI via relaxed atomics.
+- **A/B compare + undo.** A slot toggle next to Bypass (stores current settings, switches to the other slot; first press copies so nothing changes audibly), and Cmd-Z / Shift-Cmd-Z undo/redo for control edits while the editor has focus (undo transactions demarcated ~1/s so host automation can't grow the history without bound).
+
+### Fixed (feature cycle, 2026-07-03)
+
+- **Leaving bypass is now click-free** for the same reason leaving unity is: the STFT pipeline stays fed during bypass and the output switches between two sample-aligned signals (the old bypass early-return left the rings stale — the last member of the C6 defect family).
+- **Preset loads and programmatic pad moves now emit automation gestures** (QA-L3), so hosts in automation-write/touch mode record them.
+- XY pad handle enlarged with a soft fill so it reads as the grabbable object (D2-7); remaining raw label colours tokenized to the Theme (D2-9).
+- CPU measured at **~3 % of realtime per channel** at 48 kHz (target < 30 %).
+
 ### Fixed (review fix cycle, 2026-07-03)
 
 Closes the actionable findings of the three review passes (REVIEW-QA.md, REVIEW-UX.md, REVIEW-DESIGN.md 2nd pass).

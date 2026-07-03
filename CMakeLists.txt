@@ -109,6 +109,7 @@ target_sources(Unravel
         Source/DSP/LowFreqPartialTracker.h
         Source/DSP/HarmonicMaskDetector.cpp
         Source/DSP/HarmonicMaskDetector.h
+        Source/GUI/MeterRail.h
         Source/DSP/MaskReconciler.cpp
         Source/DSP/MaskReconciler.h
         Source/DSP/HPSSProcessor.cpp

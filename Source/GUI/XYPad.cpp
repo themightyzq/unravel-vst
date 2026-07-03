@@ -473,9 +473,30 @@ void XYPad::handleAsyncUpdate()
 
 void XYPad::setPosition(float xNorm, float yNorm)
 {
-    targetPosition = { juce::jlimit(0.0f, 1.0f, xNorm), 
+    targetPosition = { juce::jlimit(0.0f, 1.0f, xNorm),
                       juce::jlimit(0.0f, 1.0f, yNorm) };
+
+    // Programmatic path (preset load / host recall): mouse drags hold their
+    // own gesture (mouseDown/mouseUp), but this entry had none, so hosts in
+    // automation-write mode ignored preset-driven pad moves (REVIEW-QA QA-L3).
+    // Guarded on isDragging so a drag in progress never double-begins.
+    const bool needGesture = ! isDragging;
+    auto* tonalParam = apvts.getParameter(ParameterIDs::tonalGain);
+    auto* noiseParam = apvts.getParameter(ParameterIDs::noisyGain);
+
+    if (needGesture)
+    {
+        if (tonalParam != nullptr) tonalParam->beginChangeGesture();
+        if (noiseParam != nullptr) noiseParam->beginChangeGesture();
+    }
+
     updateParameters();
+
+    if (needGesture)
+    {
+        if (tonalParam != nullptr) tonalParam->endChangeGesture();
+        if (noiseParam != nullptr) noiseParam->endChangeGesture();
+    }
 }
 
 juce::Point<float> XYPad::screenToNormalized(juce::Point<float> screenPos) const
@@ -765,15 +786,22 @@ void XYPad::drawThumb(juce::Graphics& g)
                   screenPos.y - thumbSize/2 + 2, 
                   thumbSize, thumbSize);
     
+    // Soft fill so the handle reads as a solid, grabbable object rather than
+    // a thin outline lost in the gradient (D2-7).
+    g.setColour((isDragging ? thumbHighlightColour : thumbColour).withAlpha(0.25f));
+    g.fillEllipse(screenPos.x - thumbSize/2,
+                  screenPos.y - thumbSize/2,
+                  thumbSize, thumbSize);
+
     // Outer ring
     g.setColour(isDragging ? thumbHighlightColour : thumbColour);
-    g.drawEllipse(screenPos.x - thumbSize/2, 
-                  screenPos.y - thumbSize/2, 
-                  thumbSize, thumbSize, 2.0f);
-    
+    g.drawEllipse(screenPos.x - thumbSize/2,
+                  screenPos.y - thumbSize/2,
+                  thumbSize, thumbSize, 2.5f);
+
     // Inner dot
     g.setColour(isDragging ? thumbHighlightColour : thumbColour);
-    g.fillEllipse(screenPos.x - 4, screenPos.y - 4, 8, 8);
+    g.fillEllipse(screenPos.x - 5, screenPos.y - 5, 10, 10);
     
     // Crosshair lines - shortened to reduce visual clutter
     g.setColour(thumbColour.withAlpha(0.3f));

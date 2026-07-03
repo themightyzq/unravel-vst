@@ -25,4 +25,5 @@ namespace ParameterIDs
 
     // Post-processing
     const juce::String brightness = "brightness";             // High shelf filter for treble adjustment
+    const juce::String mix = "mix";                           // 0-100%: wet/dry blend (dry = latency-aligned input)
 }

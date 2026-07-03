@@ -6,6 +6,7 @@
 #include "GUI/SpectrumDisplay.h"
 #include "GUI/Theme.h"
 #include "GUI/CustomLookAndFeel.h"
+#include "GUI/MeterRail.h"
 
 class UnravelAudioProcessorEditor : public juce::AudioProcessorEditor,
                                     private juce::Timer
@@ -17,6 +18,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     void timerCallback() override;
+    bool keyPressed (const juce::KeyPress& key) override;   // Cmd-Z / Shift-Cmd-Z undo/redo
 
 private:
     UnravelAudioProcessor& audioProcessor;
@@ -31,6 +33,7 @@ private:
     // Header controls
     juce::Label titleLabel;
     juce::TextButton bypassButton;
+    juce::TextButton abButton;        // A/B compare toggle (label shows the active slot)
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttachment;
 
     // Separation knobs (rotary style)
@@ -38,14 +41,20 @@ private:
     juce::Slider focusKnob;
     juce::Slider floorKnob;
     juce::Slider brightnessKnob;
+    juce::Slider mixKnob;
     juce::Label separationLabel;
     juce::Label focusLabel;
     juce::Label floorLabel;
     juce::Label brightnessLabel;
+    juce::Label mixLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> separationAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> focusAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> floorAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> brightnessAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mixAttachment;
+
+    // Level meters (per-stream + output + limiter LED)
+    MeterRail meterRail;
 
     // Solo/Mute controls (one S/M pair per stream)
     juce::TextButton soloTonalButton;
@@ -68,6 +77,7 @@ private:
     juce::Slider transientGainSlider;
     juce::Label  transientGainLabel;
     juce::Label  transientEffLabel;   // shows post-knee effective gain when it differs from the fader
+    int undoDemarcationTick_ = 0;     // 30 Hz timer ticks; demarcates undo transactions ~1/s
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> transientGainAttachment;
 
     // Preset dropdown

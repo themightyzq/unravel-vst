@@ -37,6 +37,9 @@ UnravelAudioProcessorEditor::UnravelAudioProcessorEditor(UnravelAudioProcessor& 
     setupSoloMute();
     setupPresets();
 
+    // Level meters (per-stream + output + limiter LED), fed from timerCallback.
+    addAndMakeVisible(meterRail);
+
     // Spectrum scale toggle button
     scaleToggleButton.setButtonText("LOG");
     scaleToggleButton.setColour(juce::TextButton::buttonColourId, bgMid);
@@ -63,6 +66,7 @@ UnravelAudioProcessorEditor::UnravelAudioProcessorEditor(UnravelAudioProcessor& 
     // (sliders) or inherits it (buttons/combo).
     int focusOrder = 1;
     bypassButton.setExplicitFocusOrder(focusOrder++);
+    abButton.setExplicitFocusOrder(focusOrder++);
     presetSelector.setExplicitFocusOrder(focusOrder++);
     xyPad->setExplicitFocusOrder(focusOrder++);
     transientGainSlider.setExplicitFocusOrder(focusOrder++);
@@ -70,6 +74,7 @@ UnravelAudioProcessorEditor::UnravelAudioProcessorEditor(UnravelAudioProcessor& 
     focusKnob.setExplicitFocusOrder(focusOrder++);
     floorKnob.setExplicitFocusOrder(focusOrder++);
     brightnessKnob.setExplicitFocusOrder(focusOrder++);
+    mixKnob.setExplicitFocusOrder(focusOrder++);
     soloTonalButton.setExplicitFocusOrder(focusOrder++);
     muteTonalButton.setExplicitFocusOrder(focusOrder++);
     soloNoiseButton.setExplicitFocusOrder(focusOrder++);
@@ -133,6 +138,25 @@ void UnravelAudioProcessorEditor::setupHeader()
     addAndMakeVisible(bypassButton);
     bypassAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         audioProcessor.getAPVTS(), ParameterIDs::bypass, bypassButton);
+
+    // A/B compare: label shows the ACTIVE slot; clicking stores the current
+    // settings into it and switches to the other slot.
+    abButton.setButtonText(audioProcessor.isSlotB() ? "B" : "A");
+    abButton.setColour(juce::TextButton::buttonColourId, bgLight);
+    abButton.setColour(juce::TextButton::textColourOffId, accent);
+    abButton.setTooltip("A/B compare: stores the current settings in the active slot "
+                        "and switches to the other. The first press copies the current "
+                        "sound over, so tweak, then toggle to compare. Cmd-Z undoes "
+                        "control edits (switching A/B resets the undo history).");
+    abButton.setHasFocusOutline(true);
+    abButton.setTitle("A B compare");
+    abButton.setDescription("Toggle between two setting slots");
+    abButton.onClick = [this]
+    {
+        audioProcessor.toggleAB();
+        abButton.setButtonText(audioProcessor.isSlotB() ? "B" : "A");
+    };
+    addAndMakeVisible(abButton);
 }
 
 void UnravelAudioProcessorEditor::setupKnobs()
@@ -182,6 +206,10 @@ void UnravelAudioProcessorEditor::setupKnobs()
     setupKnob(brightnessKnob, brightnessLabel, "BRIGHT",
               "Brightness: High shelf filter for adjusting treble after separation. "
               "Negative = darker, Positive = brighter. Zero = no change.");
+    setupKnob(mixKnob, mixLabel, "MIX",
+              "Wet/Dry Mix: blends the processed sound with the latency-aligned "
+              "original. 100% = fully processed; lower values are phase-coherent "
+              "parallel processing (no comb filtering).");
 
     separationAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         audioProcessor.getAPVTS(), ParameterIDs::separation, separationKnob);
@@ -191,6 +219,8 @@ void UnravelAudioProcessorEditor::setupKnobs()
         audioProcessor.getAPVTS(), ParameterIDs::spectralFloor, floorKnob);
     brightnessAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         audioProcessor.getAPVTS(), ParameterIDs::brightness, brightnessKnob);
+    mixAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.getAPVTS(), ParameterIDs::mix, mixKnob);
 }
 
 void UnravelAudioProcessorEditor::setupSoloMute()
@@ -381,10 +411,17 @@ void UnravelAudioProcessorEditor::loadPreset(float tonalDb, float noiseDb, float
 {
     auto& apvts = audioProcessor.getAPVTS();
 
+    // Programmatic writes are wrapped in begin/endChangeGesture so hosts in
+    // automation-write/touch mode record the change instead of ignoring it
+    // (REVIEW-QA QA-L3), and so each set is a proper undo transaction.
     auto setParam = [&apvts](const juce::String& id, float plainValue)
     {
         if (auto* p = apvts.getParameter(id))
+        {
+            p->beginChangeGesture();
             p->setValueNotifyingHost(p->convertTo0to1(plainValue));
+            p->endChangeGesture();
+        }
     };
 
     // Tonal/Noise gains via the XY pad (keeps the thumb in sync)
@@ -401,8 +438,10 @@ void UnravelAudioProcessorEditor::loadPreset(float tonalDb, float noiseDb, float
     setParam(ParameterIDs::spectralFloor, floor);
     setParam(ParameterIDs::brightness, brightness);
 
-    // A preset defines the whole sound: clear all per-stream solo/mute and bypass
-    // so the preset plays as intended rather than inheriting stale state.
+    // A preset defines the whole sound: reset the wet/dry mix and clear all
+    // per-stream solo/mute and bypass so the preset plays as intended rather
+    // than inheriting stale state.
+    setParam(ParameterIDs::mix,           100.0f);
     setParam(ParameterIDs::soloTonal,     0.0f);
     setParam(ParameterIDs::soloNoise,     0.0f);
     setParam(ParameterIDs::soloTransient, 0.0f);
@@ -461,9 +500,11 @@ void UnravelAudioProcessorEditor::resized()
     auto header = bounds.removeFromTop(headerHeight).reduced(padding, 0);
     titleLabel.setBounds(header.removeFromLeft(90).withTrimmedTop(10));
 
-    // Right side: Bypass button — wide enough that the "BYPASS" label isn't clipped.
-    auto headerRight = header.removeFromRight(72);
+    // Right side: Bypass button (wide enough that "BYPASS" isn't clipped)
+    // with the A/B slot toggle beside it.
+    auto headerRight = header.removeFromRight(108);
     bypassButton.setBounds(headerRight.removeFromRight(64).reduced(2, 8));
+    abButton.setBounds(headerRight.removeFromRight(36).reduced(2, 8));
 
     // Center: Preset dropdown — width capped so wide windows don't balloon it
     // into a 400+ px bar (D2-4); the redundant "PRESET" caption is gone (D2-8).
@@ -506,46 +547,72 @@ void UnravelAudioProcessorEditor::resized()
     footerBar.removeFromLeft(6);
     layoutGroup(footerBar, transientFooterLabel,  soloTransientButton, muteTransientButton);
 
-    // === KNOB AREA ===
+    // === KNOB AREA === (five knobs: SEPARATION / FOCUS / FLOOR / BRIGHT / MIX)
     auto knobArea = bounds.removeFromBottom(knobAreaHeight).reduced(padding, 4);
-    int knobWidth = knobArea.getWidth() / 4;
+    const int knobWidth = knobArea.getWidth() / 5;
 
-    auto sepArea = knobArea.removeFromLeft(knobWidth);
-    separationLabel.setBounds(sepArea.removeFromTop(16));
-    separationKnob.setBounds(sepArea.reduced(4, 0));
+    const auto layoutKnob = [&knobArea, knobWidth](juce::Label& label, juce::Slider& knob,
+                                                   bool last = false)
+    {
+        auto area = last ? knobArea : knobArea.removeFromLeft(knobWidth);
+        label.setBounds(area.removeFromTop(16));
+        knob.setBounds(area.reduced(4, 0));
+    };
+    layoutKnob(separationLabel, separationKnob);
+    layoutKnob(focusLabel,      focusKnob);
+    layoutKnob(floorLabel,      floorKnob);
+    layoutKnob(brightnessLabel, brightnessKnob);
+    layoutKnob(mixLabel,        mixKnob, true);
 
-    auto focusArea = knobArea.removeFromLeft(knobWidth);
-    focusLabel.setBounds(focusArea.removeFromTop(16));
-    focusKnob.setBounds(focusArea.reduced(4, 0));
-
-    auto floorArea = knobArea.removeFromLeft(knobWidth);
-    floorLabel.setBounds(floorArea.removeFromTop(16));
-    floorKnob.setBounds(floorArea.reduced(4, 0));
-
-    auto brightArea = knobArea;
-    brightnessLabel.setBounds(brightArea.removeFromTop(16));
-    brightnessKnob.setBounds(brightArea.reduced(4, 0));
-
-    // === XY PAD + TRANSIENT FADER ===
+    // === XY PAD + METER RAIL + TRANSIENT FADER ===
     // The XY pad covers Tonal × Noise (the two streams a user wants to play
     // with continuously). The Transient stream gets a dedicated vertical fader
-    // on the right — it's a "set this level" control, not a sweep.
+    // on the right; the meter rail sits between pad and fader.
     bounds = bounds.reduced(padding);
     const int transientColW = 48;
-    const int padToFaderGap = 8;
+    const int meterColW     = 46;
+    const int colGap        = 8;
 
     auto transientCol = bounds.removeFromRight(transientColW);
     transientGainLabel.setBounds(transientCol.removeFromTop(16));
     transientEffLabel.setBounds(transientCol.removeFromBottom(14));
     transientGainSlider.setBounds(transientCol);
 
-    bounds.removeFromRight(padToFaderGap);
+    bounds.removeFromRight(colGap);
+    auto meterCol = bounds.removeFromRight(meterColW);
+    meterRail.setBounds(meterCol.reduced(0, 16));
+
+    bounds.removeFromRight(colGap);
     xyPad->setBounds(bounds);
 
     // Report the current size to the processor (a plain atomic member, NOT the
     // APVTS ValueTree) so drag-resizing doesn't dirty the host session.
     // getStateInformation() stamps this into the saved state at save time.
     audioProcessor.setEditorSize(getWidth(), getHeight());
+}
+
+bool UnravelAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
+{
+    // Cmd-Z / Shift-Cmd-Z (Ctrl on Windows/Linux): undo/redo parameter edits.
+    // APVTS routes attachment edits through the processor's UndoManager.
+    const auto noShift = juce::ModifierKeys::commandModifier;
+    const auto withShift = juce::ModifierKeys::commandModifier | juce::ModifierKeys::shiftModifier;
+
+    // Return true even when there is nothing to undo/redo: the plugin owns
+    // the chord while its editor is focused — forwarding it would trigger the
+    // HOST's undo, which is far more destructive than a no-op.
+    if (key == juce::KeyPress('z', noShift, 0))
+    {
+        audioProcessor.getUndoManager().undo();
+        return true;
+    }
+    if (key == juce::KeyPress('z', withShift, 0))
+    {
+        audioProcessor.getUndoManager().redo();
+        return true;
+    }
+
+    return juce::AudioProcessorEditor::keyPressed(key);
 }
 
 void UnravelAudioProcessorEditor::timerCallback()
@@ -575,6 +642,26 @@ void UnravelAudioProcessorEditor::timerCallback()
     }
 
     spectrumDisplay->setSampleRate(audioProcessor.getSampleRate());
+
+    // Feed the meter rail from the processor's relayed atomics. (Per-stream
+    // bars and the limiter LED reflect channel 0 — a compact mono-ized meter,
+    // not a per-channel pair; the output bar covers both channels.)
+    meterRail.setLevels(audioProcessor.getMeterTonal(), audioProcessor.getMeterNoise(),
+                        audioProcessor.getMeterTransient(),
+                        audioProcessor.getOutputRms(), audioProcessor.getOutputPeak(),
+                        audioProcessor.consumeLimiterEngaged());
+
+    // Demarcate undo transactions ~once per second. Host automation reaches
+    // the APVTS tree via a message-thread flush that never opens a new
+    // transaction on its own, so without this the single open transaction
+    // grows without bound for the session (UndoManager only prunes inside
+    // beginNewTransaction) and one Cmd-Z would revert everything. UI gestures
+    // still open their own (finer) transactions at gesture start.
+    if (++undoDemarcationTick_ >= 30)
+    {
+        undoDemarcationTick_ = 0;
+        audioProcessor.getUndoManager().beginNewTransaction();
+    }
 
     // Surface the post-knee effective transient gain when it meaningfully
     // differs from the fader's setting (pad near a corner, or solo/mute).

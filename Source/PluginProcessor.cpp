@@ -6,7 +6,7 @@ UnravelAudioProcessor::UnravelAudioProcessor()
      : AudioProcessor(BusesProperties()
                       .withInput("Input", juce::AudioChannelSet::stereo(), true)
                       .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
-       apvts(*this, nullptr, "Parameters", createParameterLayout())
+       apvts(*this, &undoManager_, "Parameters", createParameterLayout())
 {
     // Pre-size the spectrum snapshot once (bin count is fixed) so prepareToPlay
     // never reallocates the storage the UI reader points at.
@@ -165,6 +165,18 @@ juce::AudioProcessorValueTreeState::ParameterLayout UnravelAudioProcessor::creat
         }
     ));
 
+    // Mix: wet/dry blend. Dry is the latency-aligned input (the same delay
+    // line the bypass/unity paths use), so any blend stays phase-coherent.
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        ParameterIDs::mix,
+        "Mix",
+        juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
+        100.0f, // Default: fully wet (existing behavior)
+        "%",
+        juce::AudioProcessorParameter::genericParameter,
+        [](float value, int) { return juce::String(static_cast<int>(value)) + "%"; }
+    ));
+
     return { params.begin(), params.end() };
 }
 
@@ -306,6 +318,16 @@ void UnravelAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBloc
         // order-2 high shelves, so the per-block coefficient swaps in processBlock never realloc.
         filter.reset();
     }
+
+    // Wet/dry mix: parameter pointer, 20 ms smoother, and the dry/curve
+    // scratch buffers (allocated here, never on the audio thread).
+    mixParam_ = apvts.getRawParameterValue(ParameterIDs::mix);
+    mixSmoother_.reset(sampleRate, 0.02);
+    mixSmoother_.setCurrentAndTargetValue(mixParam_ != nullptr ? mixParam_->load() / 100.0f : 1.0f);
+    // max(1,...): a degenerate prepare(sr, 0) would make the blend's sub-chunk
+    // loop spin forever (same guard HPSSProcessor::prepare applies).
+    dryScratch_.assign(static_cast<size_t>(std::max(1, samplesPerBlock)), 0.0f);
+    mixScratch_.assign(static_cast<size_t>(std::max(1, samplesPerBlock)), 0.0f);
 
     // Snapshot vectors are construct-only: sized once in the ctor to numBins,
     // never reallocated, so the UI reader iterates by .size() without sync.
@@ -553,6 +575,19 @@ void UnravelAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
                              currentTransientGain);
     }
 
+    // Relay channel-0's per-stream meter levels + limiter flag to the
+    // processor-level atomics the UI reads (the UI must never touch
+    // channelProcessors — prepareToPlay rebuilds that vector).
+    if (!channelProcessors.empty() && channelProcessors[0])
+    {
+        auto& hpss = *channelProcessors[0];
+        meterTonal_.store(hpss.getMeterTonal(), std::memory_order_relaxed);
+        meterNoise_.store(hpss.getMeterNoise(), std::memory_order_relaxed);
+        meterTransient_.store(hpss.getMeterTransient(), std::memory_order_relaxed);
+        if (hpss.consumeLimiterEngaged())
+            limiterEngaged_.store(true, std::memory_order_relaxed);
+    }
+
     // Publish the latest analysis frame for the UI (lock-free; no UI access to
     // live buffers). Gated on an actual new STFT frame (or a bypass-state
     // change, so the display zeroes exactly once) — blocks smaller than the
@@ -620,6 +655,58 @@ void UnravelAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
             }
         }
     }
+
+    // Wet/dry blend — wraps the WHOLE plugin (separation + brightness).
+    // Dry is each channel's latency-aligned delay line, so any blend is
+    // phase-coherent. Skipped while bypassed (output is already fully dry).
+    if (mixParam_ != nullptr && !channelProcessors.empty())
+    {
+        mixSmoother_.setTargetValue(juce::jlimit(0.0f, 1.0f, mixParam_->load() / 100.0f));
+
+        const bool fullyWet = ! mixSmoother_.isSmoothing()
+                              && mixSmoother_.getCurrentValue() >= 0.9999f;
+        if (isBypassed || fullyWet)
+        {
+            mixSmoother_.skip(numSamples);
+        }
+        else
+        {
+            // Blend in scratch-sized sub-chunks: the scratch buffers are sized
+            // to the prepared block, and a spec-violating oversized host block
+            // must not overrun them (same contract as HPSS's internal
+            // chunking). tailOffset keeps each sub-chunk's dry window aligned.
+            const int numMixChannels = juce::jmin(totalNumInputChannels,
+                                                  static_cast<int>(channelProcessors.size()));
+            const int cap = static_cast<int>(dryScratch_.size());
+
+            for (int offset = 0; offset < numSamples; offset += cap)
+            {
+                const int chunk = juce::jmin(cap, numSamples - offset);
+                const int tail  = numSamples - offset - chunk;
+
+                // Per-sample mix curve for this sub-chunk (shared by channels).
+                if (mixSmoother_.isSmoothing())
+                    for (int i = 0; i < chunk; ++i)
+                        mixScratch_[static_cast<size_t>(i)] = mixSmoother_.getNextValue();
+                else
+                    std::fill(mixScratch_.begin(), mixScratch_.begin() + chunk,
+                              mixSmoother_.getCurrentValue());
+
+                for (int channel = 0; channel < numMixChannels; ++channel)
+                {
+                    channelProcessors[static_cast<size_t>(channel)]->readDelayedDry(dryScratch_.data(), chunk, tail);
+                    auto* wet = buffer.getWritePointer(channel) + offset;
+                    for (int i = 0; i < chunk; ++i)
+                    {
+                        const float m = mixScratch_[static_cast<size_t>(i)];
+                        wet[i] = wet[i] * m + dryScratch_[static_cast<size_t>(i)] * (1.0f - m);
+                    }
+                }
+            }
+        }
+    }
+
+    updateOutputMeter(buffer, totalNumInputChannels, numSamples);
 }
 
 void UnravelAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer,
@@ -676,6 +763,51 @@ void UnravelAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buff
         publishSpectrumSnapshot(true);
         lastPublishedBypassed_ = true;
     }
+
+    updateOutputMeter(buffer, totalNumInputChannels, numSamples);
+}
+
+void UnravelAudioProcessor::updateOutputMeter(const juce::AudioBuffer<float>& buffer,
+                                              int numChannels, int numSamples) noexcept
+{
+    // Post-everything output level for the UI meter. Two ops per sample;
+    // relaxed atomics, the UI applies smoothing/peak-hold.
+    float peak = 0.0f;
+    double sumSq = 0.0;
+    const int channels = juce::jmin(numChannels, 2);
+
+    for (int ch = 0; ch < channels; ++ch)
+    {
+        const float* d = buffer.getReadPointer(ch);
+        for (int i = 0; i < numSamples; ++i)
+        {
+            peak = juce::jmax(peak, std::abs(d[i]));
+            sumSq += static_cast<double>(d[i]) * d[i];
+        }
+    }
+
+    outputPeak_.store(peak, std::memory_order_relaxed);
+    outputRms_.store(static_cast<float>(std::sqrt(sumSq / juce::jmax(1, channels * numSamples))),
+                     std::memory_order_relaxed);
+}
+
+void UnravelAudioProcessor::toggleAB()
+{
+    // Message thread only. Store the current full state into the active slot,
+    // then recall the other; a never-visited slot mirrors the current state,
+    // so the first toggle is audibly a no-op (standard A/B semantics).
+    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+
+    auto current = apvts.copyState().createCopy();
+    (currentSlotIsB_ ? slotB_ : slotA_) = current;
+    currentSlotIsB_ = ! currentSlotIsB_;
+
+    auto& target = currentSlotIsB_ ? slotB_ : slotA_;
+    if (! target.isValid())
+        target = current.createCopy();
+
+    apvts.replaceState(target.createCopy());
+    requestParameterStateSnap();
 }
 
 // Note: The HPSSProcessor provides a much simpler and more efficient interface
