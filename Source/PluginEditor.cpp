@@ -177,7 +177,7 @@ void UnravelAudioProcessorEditor::setupKnobs()
               "Noise Floor: Cleans up quiet residue in each component. "
               "Zero = natural sound. Higher = harder cutoff, more isolation but less natural. "
               "Note: pushing the XY pad near a corner automatically lifts the effective "
-              "floor so the corner can reach full isolation — the knob shows your manual "
+              "floor so the corner can reach full isolation - the knob shows your manual "
               "value; the floor used by the algorithm is max(this, pad asymmetry).");
     setupKnob(brightnessKnob, brightnessLabel, "BRIGHT",
               "Brightness: High shelf filter for adjusting treble after separation. "
@@ -220,11 +220,11 @@ void UnravelAudioProcessorEditor::setupSoloMute()
     tonalLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(tonalLabel);
 
-    setupButton(soloTonalButton, "SOLO", juce::Colour(0xffffcc00),
+    setupButton(soloTonalButton, "SOLO", Theme::soloOn,
                 "Solo Tonal: Listen to ONLY the tonal component (harmonics, melodies, sustained sounds). "
                 "Great for checking what's being detected as tonal.",
                 "Solo Tonal");
-    setupButton(muteTonalButton, "MUTE", juce::Colour(0xffcc3333),
+    setupButton(muteTonalButton, "MUTE", Theme::muteOn,
                 "Mute Tonal: Remove the tonal component from the output. "
                 "You'll hear only the noise/texture portion of your audio.",
                 "Mute Tonal");
@@ -241,11 +241,11 @@ void UnravelAudioProcessorEditor::setupSoloMute()
     noiseLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(noiseLabel);
 
-    setupButton(soloNoiseButton, "SOLO", juce::Colour(0xffffcc00),
+    setupButton(soloNoiseButton, "SOLO", Theme::soloOn,
                 "Solo Noise: Listen to ONLY the noise component (transients, textures, breath, ambience). "
                 "Great for checking what's being detected as noise.",
                 "Solo Noise");
-    setupButton(muteNoiseButton, "MUTE", juce::Colour(0xffcc3333),
+    setupButton(muteNoiseButton, "MUTE", Theme::muteOn,
                 "Mute Noise: Remove the noise component from the output. "
                 "You'll hear only the tonal/harmonic portion of your audio.",
                 "Mute Noise");
@@ -262,11 +262,11 @@ void UnravelAudioProcessorEditor::setupSoloMute()
     transientFooterLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(transientFooterLabel);
 
-    setupButton(soloTransientButton, "SOLO", juce::Colour(0xffffcc00),
+    setupButton(soloTransientButton, "SOLO", Theme::soloOn,
                 "Solo Transient: listen to ONLY the transient component (drum hits, plosives, attacks). "
                 "Great for checking what's being detected as a transient.",
                 "Solo Transient");
-    setupButton(muteTransientButton, "MUTE", juce::Colour(0xffcc3333),
+    setupButton(muteTransientButton, "MUTE", Theme::muteOn,
                 "Mute Transient: remove the transient component from the output. "
                 "You'll hear only the tonal + noise (sustained) content.",
                 "Mute Transient");
@@ -287,15 +287,27 @@ void UnravelAudioProcessorEditor::setupSoloMute()
     transientGainSlider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     transientGainSlider.setTooltip("Transient gain: how much of the impulsive content (drum hits, "
                                    "plosives, attacks) passes through. Pull down to soften attacks; "
-                                   "push up to emphasize them. Note: at the XY pad corners, the "
-                                   "transient stream is implicitly silenced regardless of this "
-                                   "slider — push the pad back toward center to hear it again.");
+                                   "push up to emphasize them. Note: as the XY pad nears a corner, "
+                                   "the transient stream is scaled down with it (silent at the "
+                                   "exact corner) - pull the pad back toward center to restore it.");
     // Accessibility: juce::Slider defaults to no keyboard focus — enable it,
     // add the focus ring, and name it for the screen reader (D-8/R10).
     transientGainSlider.setWantsKeyboardFocus(true);
     transientGainSlider.setHasFocusOutline(true);
     transientGainSlider.setTitle("Transient Gain");
     addAndMakeVisible(transientGainSlider);
+
+    // Effective-gain readout: the pad-corner knee can pull the audible
+    // transient gain below the fader's setting; this small label surfaces the
+    // difference so the fader never silently lies (REVIEW-UX finding 1).
+    transientEffLabel.setText("", juce::dontSendNotification);
+    transientEffLabel.setFont(juce::FontOptions(Theme::fontSmall));
+    transientEffLabel.setColour(juce::Label::textColourId, Theme::transient.withAlpha(0.85f));
+    transientEffLabel.setJustificationType(juce::Justification::centred);
+    transientEffLabel.setTooltip("The transient gain actually in effect - the XY pad scales the "
+                                 "transient stream down as it nears a corner, and Solo/Mute can "
+                                 "silence it entirely.");
+    addAndMakeVisible(transientEffLabel);
 
     transientGainLabel.setText("TRANS", juce::dontSendNotification);
     transientGainLabel.setFont(juce::FontOptions(Theme::fontSmall).withStyle("Bold"));
@@ -309,12 +321,9 @@ void UnravelAudioProcessorEditor::setupSoloMute()
 
 void UnravelAudioProcessorEditor::setupPresets()
 {
-    // Preset label
-    presetLabel.setText("PRESET", juce::dontSendNotification);
-    presetLabel.setFont(juce::FontOptions(Theme::fontSmall).withStyle("Bold"));
-    presetLabel.setColour(juce::Label::textColourId, textDim);
-    presetLabel.setJustificationType(juce::Justification::centredRight);
-    addAndMakeVisible(presetLabel);
+    // No standalone "PRESET" caption: the combo's own placeholder already
+    // reads "Presets", so the label was pure redundancy (REVIEW-DESIGN D2-8).
+    presetLabel.setVisible(false);
 
     // Preset dropdown. This acts as a loader (an action menu), not a "current state"
     // indicator: it shows "Presets" when idle and resets after loading, so it can
@@ -353,7 +362,7 @@ void UnravelAudioProcessorEditor::setupPresets()
             case 1: loadPreset(0.0f,    0.0f,   0.0f, 85.0f,   0.0f, 0.0f,  0.0f); break; // Default (neutral, all streams pass) — separation matches v1.3.1's new default
             case 2: loadPreset(0.0f,  -60.0f, -60.0f, 90.0f, -50.0f, 30.0f, 0.0f); break; // Extract Tonal — mute noise + transient
             case 3: loadPreset(-60.0f,  0.0f, -60.0f, 90.0f,  50.0f, 30.0f, 0.0f); break; // Extract Noise — mute tonal + transient
-            case 4: loadPreset(0.0f,    0.0f,   0.0f, 40.0f,   0.0f, 0.0f,  0.0f); break; // Gentle (all streams pass, soft separation)
+            case 4: loadPreset(0.0f,   -6.0f,   0.0f, 40.0f,   0.0f, 0.0f,  0.0f); break; // Gentle (mild de-noise at soft separation — audibly does something; all-unity would be bit-identical to input)
             case 5: loadPreset(0.0f,  -20.0f,  -3.0f, 80.0f, -20.0f, 10.0f, 0.0f); break; // Dialogue De-noise — voice intact, room/hiss pulled down, consonants kept
             case 6: loadPreset(-15.0f,  0.0f,   0.0f, 85.0f,  30.0f, 10.0f, 0.0f); break; // Ambience Rescue — drop tonal (music/hum), keep the ambient bed + texture
             case 7: loadPreset(0.0f,    0.0f, -24.0f, 75.0f,   0.0f, 0.0f,  0.0f); break; // Tame Transients — soften clicks/hits, leave the body untouched
@@ -432,7 +441,7 @@ void UnravelAudioProcessorEditor::drawSectionDividers(juce::Graphics& g)
     g.drawHorizontalLine(headerHeight, 0, static_cast<float>(bounds.getWidth()));
 
     // Line below spectrum
-    g.drawHorizontalLine(headerHeight + spectrumHeight, 0, static_cast<float>(bounds.getWidth()));
+    g.drawHorizontalLine(headerHeight + currentSpectrumHeight(), 0, static_cast<float>(bounds.getWidth()));
 
     // Line above knobs (below XY pad)
     int knobTop = bounds.getHeight() - soloMuteHeight - knobAreaHeight;
@@ -456,20 +465,25 @@ void UnravelAudioProcessorEditor::resized()
     auto headerRight = header.removeFromRight(72);
     bypassButton.setBounds(headerRight.removeFromRight(64).reduced(2, 8));
 
-    // Center: Preset dropdown
+    // Center: Preset dropdown — width capped so wide windows don't balloon it
+    // into a 400+ px bar (D2-4); the redundant "PRESET" caption is gone (D2-8).
     auto presetArea = header.reduced(20, 8);
-    presetLabel.setBounds(presetArea.removeFromLeft(50));
-    presetSelector.setBounds(presetArea.reduced(4, 0));
+    if (presetArea.getWidth() > 240)
+        presetArea = presetArea.withSizeKeepingCentre(240, presetArea.getHeight());
+    presetSelector.setBounds(presetArea);
 
-    // === SPECTRUM DISPLAY ===
-    auto spectrumArea = bounds.removeFromTop(spectrumHeight).reduced(padding, 4);
+    // === SPECTRUM DISPLAY === (grows with the window — see currentSpectrumHeight)
+    auto spectrumArea = bounds.removeFromTop(currentSpectrumHeight()).reduced(padding, 4);
     spectrumDisplay->setBounds(spectrumArea);
 
-    // === FOOTER BAR (per-stream Solo/Mute + Scale Toggle) ===
-    auto footerBar = bounds.removeFromBottom(soloMuteHeight).reduced(padding, 6);
+    // LOG/LIN lives ON the spectrum it controls (D2-5: it used to sit in the
+    // footer, five sections away, styled like part of the TRANS group). Placed
+    // left of the right-edge dB labels; added after the display so it z-orders
+    // above it.
+    scaleToggleButton.setBounds(spectrumArea.getRight() - 88, spectrumArea.getY() + 3, 40, 18);
 
-    // Scale toggle on the right (standardized 48x28)
-    scaleToggleButton.setBounds(footerBar.removeFromRight(48).reduced(0, 5));
+    // === FOOTER BAR (per-stream Solo/Mute) ===
+    auto footerBar = bounds.removeFromBottom(soloMuteHeight).reduced(padding, 6);
 
     // Three compact groups: TONAL | NOISE | TRANS  (each label 42 + S 44 + M 44 = 130).
     // Width budget at the 480px min: 480 - 2*padding(10) - scaleToggle(48) = 412.
@@ -522,6 +536,7 @@ void UnravelAudioProcessorEditor::resized()
 
     auto transientCol = bounds.removeFromRight(transientColW);
     transientGainLabel.setBounds(transientCol.removeFromTop(16));
+    transientEffLabel.setBounds(transientCol.removeFromBottom(14));
     transientGainSlider.setBounds(transientCol);
 
     bounds.removeFromRight(padToFaderGap);
@@ -535,5 +550,40 @@ void UnravelAudioProcessorEditor::resized()
 
 void UnravelAudioProcessorEditor::timerCallback()
 {
+    // Standalone only: seed keyboard focus once the editor is actually on
+    // screen so Tab traversal has a visible starting point (REVIEW-DESIGN
+    // D2-2 — with no initially-focused component, Tab had nowhere to start
+    // and the focus rings never appeared). Done from the timer because the
+    // editor is added to its window before the window is shown, so no
+    // hierarchy callback fires at the moment it becomes visible. In a DAW we
+    // deliberately do NOT steal focus on open — the host owns the keyboard
+    // (Space = transport!) until the user clicks into the editor; a click
+    // focuses that control and Tab works from there.
+    if (juce::JUCEApplicationBase::isStandaloneApp() && isShowing())
+    {
+        // Idempotent, not one-shot: when the standalone window becomes key,
+        // macOS gives keyboard focus to the DocumentWindow ITSELF (verified
+        // by instrumentation — not to any control), so Tab traversal has no
+        // useful starting point and the focus rings never appear. Seed the
+        // first control whenever focus is nowhere or parked on the top-level
+        // window. Never steals from a real control (e.g. the wrapper's
+        // Settings button or wherever the user has tabbed to).
+        auto* focused = juce::Component::getCurrentlyFocusedComponent();
+        if (focused == nullptr || focused == getTopLevelComponent())
+            if (auto* peer = getPeer(); peer != nullptr && peer->isFocused())
+                bypassButton.grabKeyboardFocus();
+    }
+
     spectrumDisplay->setSampleRate(audioProcessor.getSampleRate());
+
+    // Surface the post-knee effective transient gain when it meaningfully
+    // differs from the fader's setting (pad near a corner, or solo/mute).
+    const float setDb = (float) transientGainSlider.getValue();
+    const float effDb = audioProcessor.getEffectiveTransientDb();
+    juce::String text;
+    if (std::abs(effDb - setDb) > 0.5f)
+        text = (effDb <= -59.5f) ? juce::String("eff -inf")
+                                 : "eff " + juce::String(effDb, 1) + " dB";
+    if (text != transientEffLabel.getText())
+        transientEffLabel.setText(text, juce::dontSendNotification);
 }

@@ -43,13 +43,27 @@ void CustomLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int wi
     g.setColour(slider.findColour(juce::Slider::rotarySliderOutlineColourId));
     g.strokePath(track, juce::PathStrokeType(lineW, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
-    // Filled value arc
+    // Filled value arc. Bipolar parameters (range spanning 0, e.g. FOCUS and
+    // BRIGHT) anchor the fill at the 12-o'clock centre detent so "neutral"
+    // draws as an empty arc instead of half-lit (REVIEW-DESIGN D2-1);
+    // unipolar parameters keep the conventional min-anchored fill.
     if (slider.isEnabled())
     {
-        juce::Path value;
-        value.addCentredArc(centre.x, centre.y, arcR, arcR, 0.0f, rotaryStartAngle, toAngle, true);
-        g.setColour(slider.findColour(juce::Slider::rotarySliderFillColourId));
-        g.strokePath(value, juce::PathStrokeType(lineW, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        const bool bipolar = slider.getMinimum() < 0.0 && slider.getMaximum() > 0.0;
+        float fromAngle = rotaryStartAngle;
+        if (bipolar)
+        {
+            const float zeroPos = static_cast<float>(slider.valueToProportionOfLength(0.0));
+            fromAngle = rotaryStartAngle + zeroPos * (rotaryEndAngle - rotaryStartAngle);
+        }
+
+        if (std::abs(toAngle - fromAngle) > 1.0e-3f)
+        {
+            juce::Path value;
+            value.addCentredArc(centre.x, centre.y, arcR, arcR, 0.0f, fromAngle, toAngle, true);
+            g.setColour(slider.findColour(juce::Slider::rotarySliderFillColourId));
+            g.strokePath(value, juce::PathStrokeType(lineW, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
     }
 
     // Thumb dot on the arc

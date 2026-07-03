@@ -27,6 +27,13 @@ namespace Theme
     inline const juce::Colour transient { 0xffffcc44 };
     inline const juce::Colour noise     { 0xffff8844 };
 
+    // === Button state colours (tokenized: D2-3) ===
+    // Solo-on uses the accent teal — deliberately DISTINCT from all three
+    // stream colours so a lit "SOLO" can't be misread as the transient
+    // stream (the old 0xffffcc00 was near-identical to Theme::transient).
+    inline const juce::Colour soloOn { 0xff00d4aa };
+    inline const juce::Colour muteOn { 0xffcc3333 };  // shared "danger/off" red with Bypass
+
     // === Text ===
     inline const juce::Colour textBright { 0xffcccccc };
     inline const juce::Colour textDim    { 0xff888888 };

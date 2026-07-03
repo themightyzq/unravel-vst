@@ -1098,7 +1098,9 @@ void XYPad::drawHintText(juce::Graphics& g)
     auto bounds = getLocalBounds().toFloat();
 
     // Draw hint at bottom center
-    juce::String hintText = "Scroll to zoom \u2022 Middle-click+drag to pan";
+    // ASCII only: \u2022 in a char* literal produces UTF-8 bytes that JUCE's
+    // Latin-1 String constructor renders as mojibake ("\u00e2\u20ac\u00a2").
+    juce::String hintText = "Scroll to zoom | Middle-click+drag to pan";
 
     g.setColour(textColour.withAlpha(0.6f * hintAlpha_));
     g.setFont(juce::FontOptions(11.0f));

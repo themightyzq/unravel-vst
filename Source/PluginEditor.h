@@ -67,6 +67,7 @@ private:
     // Transient stream gain (vertical fader right of the XY pad)
     juce::Slider transientGainSlider;
     juce::Label  transientGainLabel;
+    juce::Label  transientEffLabel;   // shows post-knee effective gain when it differs from the fader
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> transientGainAttachment;
 
     // Preset dropdown
@@ -87,7 +88,16 @@ private:
     // Section heights — single source of truth shared by resized() and
     // drawSectionDividers() so the dividers can never drift from the sections.
     static constexpr int headerHeight   = 44;
-    static constexpr int spectrumHeight  = 80;
+    static constexpr int spectrumHeight  = 80;   // at the minimum window height
+    static constexpr int baseEditorHeight = 600; // = setResizeLimits minimum
+
+    // The spectrum absorbs a third of any extra window height (the pad takes
+    // the rest) instead of staying an 80 px sliver at large sizes (D2-4).
+    // Shared by resized() and drawSectionDividers() so the divider can't drift.
+    int currentSpectrumHeight() const noexcept
+    {
+        return spectrumHeight + juce::jmax(0, (getHeight() - baseEditorHeight) / 3);
+    }
     static constexpr int knobAreaHeight  = 100;
     static constexpr int soloMuteHeight  = 50;
 

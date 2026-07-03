@@ -140,7 +140,9 @@ void SpectrumDisplay::paint(juce::Graphics& g)
     {
         g.setColour(Theme::textDim);
         g.setFont(juce::FontOptions(Theme::fontSmall));
-        g.drawText("Waiting for audio…", getLocalBounds(), juce::Justification::centred);
+        // ASCII only: a raw UTF-8 ellipsis in a char* literal goes through
+        // juce::String's Latin-1 constructor and renders as mojibake.
+        g.drawText("Waiting for audio...", getLocalBounds(), juce::Justification::centred);
     }
 }
 
