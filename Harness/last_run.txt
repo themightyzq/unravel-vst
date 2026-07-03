@@ -29,8 +29,8 @@ Measuring blocks 120..400 (post-warmup)
 === Signal: lightsaber hum+crackle   (separation=85%) ===
   Reference full-mix energy: 1.1587e+04
   Corner                                 outEnergy  vsFull(dB)       floor
-  TONAL-ONLY  (T=+0dB, N=-inf)          1.1340e+04       -0.09       1.000
-  NOISE-ONLY  (T=-inf, N=+0dB)          2.0293e+02      -17.57       1.000
+  TONAL-ONLY  (T=+0dB, N=-inf)          1.1350e+04       -0.09       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          1.9149e+02      -17.82       1.000
   FULL MIX    (T=+0dB, N=+0dB)          1.1587e+04       +0.00       0.000
   SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
 
@@ -69,8 +69,8 @@ Measuring blocks 120..400 (post-warmup)
 === Signal: lightsaber hum+crackle   (separation=100%) ===
   Reference full-mix energy: 1.1587e+04
   Corner                                 outEnergy  vsFull(dB)       floor
-  TONAL-ONLY  (T=+0dB, N=-inf)          1.1302e+04       -0.11       1.000
-  NOISE-ONLY  (T=-inf, N=+0dB)          2.0329e+02      -17.56       1.000
+  TONAL-ONLY  (T=+0dB, N=-inf)          1.1312e+04       -0.10       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          1.9184e+02      -17.81       1.000
   FULL MIX    (T=+0dB, N=+0dB)          1.1587e+04       +0.00       0.000
   SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
 
@@ -109,8 +109,8 @@ Measuring blocks 120..400 (post-warmup)
 === Signal: lightsaber hum+crackle   (separation=0%) ===
   Reference full-mix energy: 1.1587e+04
   Corner                                 outEnergy  vsFull(dB)       floor
-  TONAL-ONLY  (T=+0dB, N=-inf)          1.1536e+04       -0.02       1.000
-  NOISE-ONLY  (T=-inf, N=+0dB)          4.6937e+00      -33.92       1.000
+  TONAL-ONLY  (T=+0dB, N=-inf)          1.1539e+04       -0.02       1.000
+  NOISE-ONLY  (T=-inf, N=+0dB)          4.4415e+00      -34.16       1.000
   FULL MIX    (T=+0dB, N=+0dB)          1.1587e+04       +0.00       0.000
   SILENT      (T=-inf, N=-inf)          0.0000e+00     -300.00       0.000
 
@@ -158,25 +158,25 @@ Measuring blocks 120..400 (post-warmup)
   B. FULL lightsaber — Goertzel HUM-FREQUENCY rejection at noise corner
      hum freqs (Hz)        : 99.61  158.20
      Goertzel power (full) : 5.6852e+03
-     Goertzel power (noise corner) : 2.1034e-02
+     Goertzel power (noise corner) : 2.1014e-02
      TRUE hum rejection    : -54.32 dB
 
   C. FULL lightsaber — Goertzel CRACKLE-BAND (3 kHz) at noise corner vs full
      Goertzel power (full) : 8.1647e-02
-     Goertzel power (noise corner) : 8.0739e-02
+     Goertzel power (noise corner) : 8.0671e-02
      Crackle retention     : -0.05 dB  (expect ~0 dB = crackle kept)
 
   D. FULL lightsaber — WHOLE-SIGNAL rejection at noise corner (−21 dB baseline)
      whole-signal full-mix energy  : 1.1587e+04
-     whole-signal corner energy    : 2.0293e+02
-     whole-signal rejection        : -17.57 dB
+     whole-signal corner energy    : 1.9149e+02
+     whole-signal rejection        : -17.82 dB
 
   SUMMARY
   -------
   Hum-only whole-signal rejection : -57.37 dB
   Full saber HUM Goertzel rejection: -54.32 dB  <- true hum bleed
   Full saber CRACKLE retention     : -0.05 dB  <- should be ~0 dB
-  Full saber WHOLE-signal          : -17.57 dB  <- the original number
+  Full saber WHOLE-signal          : -17.82 dB  <- the original number
 ================================================================
   [PASS] mask reconciler: band=1.000 far=0.000 inBounds=1
   [PASS] harmonic detector: peak tonal=1.000 off-peak=0.065
@@ -213,5 +213,6 @@ Measuring blocks 120..400 (post-warmup)
   [PASS] SR= 88200: hum reject  -68.60 dB (<= -40) | hum keep  -0.00 dB (> -3) | noise reject  -59.39 dB (<= -40)
   [PASS] SR= 96000: hum reject  -68.78 dB (<= -40) | hum keep  -0.00 dB (> -3) | noise reject  -60.92 dB (<= -40)
   [PASS] SR=192000: hum reject  -71.88 dB (<= -40) | hum keep  -0.00 dB (> -3) | noise reject  -70.49 dB (<= -40)
+  [PASS] voice-register isolation (f0=147Hz x10 + hiss bed): voice  -53.87 dB (<= -35) | hiss  +0.01 dB (> -3)
 
 ALL ISOLATION TARGETS MET.

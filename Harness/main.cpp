@@ -992,6 +992,76 @@ static bool checkIsolationAcrossSampleRates()
     return allOk;
 }
 
+// -------------------------------------------------------------------------
+// Voice-register isolation (REVIEW-UX finding 4 regression gate).
+// A multi-partial voice-like tone with f0 in the low-male register defeats
+// the HPSS vertical median at EVERY harmonic: with partial spacing below
+// ~8 bins the 13-bin median window centred on any partial is filled with the
+// neighbouring partials' window skirts, so the whole comb classifies as
+// noise (f0=147 Hz retained at −11 dB in the extracted noise while f0=330 Hz
+// achieved −52 dB). The LowFreqPartialTracker's harmonic extension claims the
+// verified harmonic series of a confirmed fundamental; this check pins that.
+//
+// Signal: 10-partial 1/n harmonic series at f0≈147 Hz plus a broadband hiss
+// bed 17 dB below the voice (the competing bed is what contaminated the
+// vertical median). Settings mirror the Extract Noise preset: tonal −60 dB,
+// noise 0 dB, transient −60 dB, separation 90%, focus +50, floor 30% (the
+// corner lift then drives the effective floor to 1.0, as in the plugin).
+// Gates:  voice retention (Goertzel over the partials) <= −35 dB
+//         hiss retention  (Goertzel in the hiss band)   > −3 dB
+//   — the pair keeps the fix honest: the voice must LEAVE the noise stream
+//     while the bed it competed with stays in it.
+// -------------------------------------------------------------------------
+static bool checkVoiceRegisterIsolation()
+{
+    const int bufLen = kBlock * kNumBlocks;   // spans the whole run: hiss is genuinely broadband
+
+    const double f0 = seamlessFreq (147.0, bufLen);
+    std::vector<double> partialFreqs;
+    for (int h = 1; h <= 10; ++h)
+        partialFreqs.push_back (f0 * h);      // integer multiples of a seamless f0 are seamless
+
+    // Hiss RMS 17 dB below the voice RMS (voice partial amps 0.18/n).
+    const float voiceAmp = 0.18f;
+    double sumSq = 0.0;
+    for (int h = 1; h <= 10; ++h) sumSq += 1.0 / (double) (h * h);
+    const float voiceRms = voiceAmp * (float) std::sqrt (sumSq / 2.0);
+    const float hissAmp  = voiceRms * dbToLinear (-17.0f) * (float) std::sqrt (3.0); // uniform amp for that RMS
+
+    std::vector<float> mix ((size_t) bufLen, 0.0f);
+    for (int n = 0; n < bufLen; ++n)
+    {
+        const double t = (double) n / kSR;
+        double v = 0.0;
+        for (int h = 1; h <= 10; ++h)
+            v += std::sin (2.0 * M_PI * f0 * h * t) / (double) h;
+        mix[(size_t) n] = voiceAmp * (float) v;
+    }
+    juce::Random rng ((juce::int64) 4242);
+    for (auto& s : mix) s += hissAmp * (rng.nextFloat() * 2.0f - 1.0f);
+
+    // Hiss-band probe frequencies, seamless-snapped (well above the harmonic ceiling).
+    std::vector<double> hissFreqs;
+    for (double f : { 6500.0, 7200.0, 8100.0, 8900.0, 9700.0 })
+        hissFreqs.push_back (seamlessFreq (f, bufLen));
+
+    const ResolvedParams full = resolveParams (0.0f, 0.0f, 0.0f, 0.0f);            // sep 85, focus 0
+    const ResolvedParams ex   = resolveParams (-60.0f, 0.0f, -60.0f, 0.30f);       // Extract Noise
+
+    const double voiceFull = measureBandEnergy (mix, 0.85f, 0.0f, full, partialFreqs);
+    const double voiceEx   = measureBandEnergy (mix, 0.90f, 0.5f,  ex,   partialFreqs);
+    const double hissFull  = measureBandEnergy (mix, 0.85f, 0.0f, full, hissFreqs);
+    const double hissEx    = measureBandEnergy (mix, 0.90f, 0.5f,  ex,   hissFreqs);
+
+    const double voiceRetDb = toDb (voiceEx / std::max (voiceFull, 1e-30));
+    const double hissRetDb  = toDb (hissEx  / std::max (hissFull,  1e-30));
+
+    const bool ok = voiceRetDb <= -35.0 && hissRetDb > -3.0;
+    std::printf ("  [%s] voice-register isolation (f0=147Hz x10 + hiss bed): voice %+7.2f dB (<= -35) | hiss %+6.2f dB (> -3)\n",
+                 ok ? "PASS" : "FAIL", voiceRetDb, hissRetDb);
+    return ok;
+}
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI juceInit; // for message-thread-free JUCE bits
@@ -1033,6 +1103,7 @@ int main()
     targetsOk &= checkIsolationTargets (85.0f);
     targetsOk &= checkIsolationTargets (100.0f);
     targetsOk &= checkIsolationAcrossSampleRates();
+    targetsOk &= checkVoiceRegisterIsolation();
 
     std::printf ("\n%s\n", targetsOk ? "ALL ISOLATION TARGETS MET."
                                      : "ISOLATION TARGETS NOT MET (expected pre-implementation).");

@@ -245,6 +245,24 @@ public:
     juce::Span<const float> getCurrentTransientMask() const noexcept;
 
     /**
+     * Read the latency-aligned dry input for (part of) this block — the same
+     * delay line the bypass/unity passthrough uses. Non-destructive; call
+     * after processBlock() for the block just processed. tailOffset is how
+     * many samples of this block come AFTER the requested window (0 = the
+     * newest numSamples), letting large blocks be blended in sub-chunks.
+     */
+    void readDelayedDry(float* dst, int numSamples, int tailOffset = 0) noexcept;
+
+    /** Post-gain per-stream levels (linear, ~0..1 vs a full-scale-sine
+        reference; approximate). Written per STFT frame on the audio thread. */
+    float getMeterTonal()     const noexcept { return meterTonal_.load(std::memory_order_relaxed); }
+    float getMeterTransient() const noexcept { return meterTransient_.load(std::memory_order_relaxed); }
+    float getMeterNoise()     const noexcept { return meterNoise_.load(std::memory_order_relaxed); }
+
+    /** True if the safety limiter clamped since the last call (clears). */
+    bool consumeLimiterEngaged() noexcept { return limiterEngaged_.exchange(false, std::memory_order_relaxed); }
+
+    /**
      * True if at least one new analysis frame was produced since the last
      * call; clears the flag. Lets the host publish visualization snapshots
      * per STFT hop instead of per audio block.
@@ -268,6 +286,12 @@ private:
     bool safetyLimitingEnabled_ = true;                 ///< Safety limiting flag
     bool isInitialized_ = false;                        ///< Initialization state
     bool analysisFrameUpdated_ = false;                 ///< New analysis frame since last consume
+
+    // === Metering (audio thread writes, UI reads; relaxed atomics) ===
+    std::atomic<float> meterTonal_     { 0.0f };
+    std::atomic<float> meterTransient_ { 0.0f };
+    std::atomic<float> meterNoise_     { 0.0f };
+    std::atomic<bool>  limiterEngaged_ { false };
 
     // === Separation Parameters ===
     float separation_ = 0.75f;                          ///< Separation amount (0-1)

@@ -125,19 +125,13 @@ void HPSSProcessor::processBlock(const float* inputBuffer,
     // left over from the last time the line was used.
     writeDelayLine(inputBuffer, numSamples);
 
-    // Handle bypass mode
-    if (bypassEnabled_)
-    {
-        readDelayLine(outputBuffer, numSamples);
-        return;
-    }
-
-    // All three streams at unity (targets and smoothers settled)? The STFT
-    // pipeline below still runs — that keeps the analysis/synthesis rings and
-    // the mask-estimator statistics warm (no click when a gain leaves unity)
-    // and keeps the spectrum display live — but the audible output is taken
-    // from the bit-perfect delay line instead of the reconstruction.
-    const bool unityPassthrough = isUnitySettled(tonalGain, noiseGain, transientGain);
+    // Bypass and settled-unity both output the bit-perfect delay line, but the
+    // STFT pipeline below still runs in EITHER case: rings and mask-estimator
+    // statistics stay warm, so leaving bypass or unity is click-free (the old
+    // bypass early-return left the rings stale and clicked on exit — same
+    // defect family as the C6 unity-exit click).
+    const bool delayLinePassthrough = bypassEnabled_
+                                      || isUnitySettled(tonalGain, noiseGain, transientGain);
 
     // Update parameter smoothing
     updateParameterSmoothing(tonalGain, noiseGain, transientGain);
@@ -184,14 +178,37 @@ void HPSSProcessor::processBlock(const float* inputBuffer,
         noiseGainSmoother_.skip(hopSize);
         transientGainSmoother_.skip(hopSize);
 
-        // Apply masks to magnitudes — sum the three gained streams.
+        // Apply masks to magnitudes — sum the three gained streams — and
+        // accumulate per-stream spectral energy for the meters in the same
+        // pass (no extra loop).
+        float energyTonal = 0.0f, energyTransient = 0.0f, energyNoise = 0.0f;
         for (int bin = 0; bin < numBins_; ++bin)
         {
             const auto b = static_cast<size_t>(bin);
             const float originalMag = magnitudes[b];
-            magnitudes[b] = originalMag * (tonalMaskBuffer_[b]     * currentTonalGain
-                                         + transientMaskBuffer_[b] * currentTransientGain
-                                         + noiseMaskBuffer_[b]     * currentNoiseGain);
+            const float mT  = tonalMaskBuffer_[b]     * originalMag;
+            const float mTr = transientMaskBuffer_[b] * originalMag;
+            const float mN  = noiseMaskBuffer_[b]     * originalMag;
+            energyTonal     += mT  * mT;
+            energyTransient += mTr * mTr;
+            energyNoise     += mN  * mN;
+            magnitudes[b] = mT * currentTonalGain
+                          + mTr * currentTransientGain
+                          + mN * currentNoiseGain;
+        }
+
+        // Publish post-gain per-stream levels for the UI meters, normalised by
+        // the same fftSize/4 full-scale-sine reference the spectrum display
+        // uses. Approximate (Parseval-ish, sine-referenced) but honest as a
+        // relative meter; relaxed atomics, UI smooths/peak-holds.
+        {
+            const float ref = static_cast<float>(stftProcessor_->getFftSize()) * 0.25f;
+            meterTonal_.store(std::sqrt(energyTonal) * currentTonalGain / ref,
+                              std::memory_order_relaxed);
+            meterTransient_.store(std::sqrt(energyTransient) * currentTransientGain / ref,
+                                  std::memory_order_relaxed);
+            meterNoise_.store(std::sqrt(energyNoise) * currentNoiseGain / ref,
+                              std::memory_order_relaxed);
         }
 
         // Convert back to complex representation
@@ -211,11 +228,11 @@ void HPSSProcessor::processBlock(const float* inputBuffer,
     // 3. Extract output samples from STFT processor
     stftProcessor_->processOutput(outputBuffer, numSamples);
 
-    // 4a. Unity passthrough: overwrite the (near-identical, ~-146 dB error)
-    // reconstruction with the bit-perfect delayed input. Both paths carry the
-    // same latency and the pipeline above stayed fed, so switching between
-    // them is sample-aligned and click-free.
-    if (unityPassthrough)
+    // 4a. Bypass / unity passthrough: overwrite the (near-identical, ~-146 dB
+    // error) reconstruction with the bit-perfect delayed input. Both paths
+    // carry the same latency and the pipeline above stayed fed, so switching
+    // between them is sample-aligned and click-free.
+    if (delayLinePassthrough)
     {
         readDelayLine(outputBuffer, numSamples);
         return;
@@ -394,10 +411,14 @@ void HPSSProcessor::snapGainSmoothers(float tonalGain, float noiseGain, float tr
 
 void HPSSProcessor::applySafetyLimiting(float* buffer, int numSamples) noexcept
 {
+    bool engaged = false;
     for (int i = 0; i < numSamples; ++i)
     {
+        engaged = engaged || std::abs(buffer[i]) > kSafetyThreshold;
         buffer[i] = softLimit(buffer[i]);
     }
+    if (engaged)
+        limiterEngaged_.store(true, std::memory_order_relaxed);   // UI clears via exchange
 }
 
 void HPSSProcessor::writeDelayLine(const float* inputBuffer, int numSamples) noexcept
@@ -428,6 +449,34 @@ void HPSSProcessor::readDelayLine(float* outputBuffer, int numSamples) noexcept
     for (int i = 0; i < numSamples; ++i)
     {
         outputBuffer[i] = bypassBuffer_[static_cast<size_t>(readPos)];
+        readPos = (readPos + 1) % bufferSize;
+    }
+}
+
+void HPSSProcessor::readDelayedDry(float* dst, int numSamples, int tailOffset) noexcept
+{
+    // Non-destructive: computes its position as a fixed offset behind the
+    // write pointer, so it can be called any number of times after
+    // processBlock() for the same block (the host layer uses it for the
+    // latency-aligned wet/dry blend, in sub-chunks for large blocks).
+    // tailOffset = how many samples of THIS block come after the requested
+    // window (0 = the newest numSamples).
+    const int bufferSize = static_cast<int>(bypassBuffer_.size());
+    const int latency = getLatencyInSamples();
+
+    // Clamp the read depth to what the ring still holds. Only reachable if a
+    // host exceeds its own prepared maximum block size (already a contract
+    // violation, handled without corruption elsewhere): the oldest sub-chunk
+    // then reads slightly newer dry instead of overrunning the ring.
+    int depth = latency + tailOffset + numSamples;
+    depth = std::min(depth, bufferSize);
+
+    int readPos = bypassWritePos_ - depth;
+    readPos = ((readPos % bufferSize) + bufferSize) % bufferSize;
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        dst[i] = bypassBuffer_[static_cast<size_t>(readPos)];
         readPos = (readPos + 1) % bufferSize;
     }
 }
