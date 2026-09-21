@@ -1,5 +1,8 @@
 # JUCE VST3 Plugin UI/UX Best Practices Guide
 
+> Synced copy for this public repository. The canonical copy lives in the ZQ SFX JUCE workspace (`JUCE/docs/`); edit that one and re-sync.
+> Visual styling (palette, fonts, control drawing) is being superseded by the ZQ SFX UI style guide (workspace doc `ZQSFX_UI_STYLE_GUIDE.md`), which takes the plugin "Broken" as the house baseline. The layout, interaction, and accessibility guidance below still applies.
+
 A comprehensive guide for designing professional, accessible, and visually cohesive VST3 plugin interfaces with JUCE. Based on practical experience building the HyperPrism Reimagined 32-plugin suite.
 
 ---

@@ -1,5 +1,7 @@
 # Soundminer VST3 Troubleshooting Guide
 
+> Synced copy for this public repository. The canonical copy lives in the ZQ SFX JUCE workspace (`JUCE/docs/`); edit that one and re-sync.
+
 ## Supported Platforms/Architectures
 
 | Platform | Architecture | Status |
@@ -8,7 +10,7 @@
 | macOS 14.x (Sonoma) | arm64 | Supported |
 | macOS 13.x (Ventura) | arm64 | Supported |
 
-**Note:** Unravel is built as a Universal Binary (arm64 + x86_64) for maximum compatibility.
+**Note:** Every ZQ SFX plugin is built as a Universal Binary (arm64 + x86_64) for maximum compatibility. (Worked example below: Unravel.)
 
 ## Install Locations
 
@@ -28,7 +30,7 @@ After building with `COPY_PLUGIN_AFTER_BUILD TRUE`, the plugin auto-installs to 
 # Install pluginval if needed
 brew install --cask pluginval
 
-# Validate Unravel
+# Validate your plugin (example: Unravel)
 /Applications/pluginval.app/Contents/MacOS/pluginval \
     --validate ~/Library/Audio/Plug-Ins/VST3/Unravel.vst3 \
     --strictness-level 10
@@ -39,8 +41,8 @@ Expected: `SUCCESS` with all tests passing.
 ### 2. Verify Code Signing
 
 ```bash
-codesign -dvvv ~/Library/Audio/Plug-Ins/VST3/Unravel.vst3
-spctl --assess -vvv ~/Library/Audio/Plug-Ins/VST3/Unravel.vst3
+codesign -dvvv ~/Library/Audio/Plug-Ins/VST3/<YourPlugin>.vst3
+spctl --assess -vvv ~/Library/Audio/Plug-Ins/VST3/<YourPlugin>.vst3
 ```
 
 Expected output should show:
@@ -50,8 +52,8 @@ Expected output should show:
 ### 3. Check Architecture
 
 ```bash
-file ~/Library/Audio/Plug-Ins/VST3/Unravel.vst3/Contents/MacOS/Unravel
-lipo -info ~/Library/Audio/Plug-Ins/VST3/Unravel.vst3/Contents/MacOS/Unravel
+file ~/Library/Audio/Plug-Ins/VST3/<YourPlugin>.vst3/Contents/MacOS/<YourPlugin>
+lipo -info ~/Library/Audio/Plug-Ins/VST3/<YourPlugin>.vst3/Contents/MacOS/<YourPlugin>
 ```
 
 Expected: `Mach-O universal binary with 2 architectures: [x86_64] [arm64]`
@@ -61,7 +63,7 @@ Expected: `Mach-O universal binary with 2 architectures: [x86_64] [arm64]`
 ### Soundminer Plugin Cache
 
 ```bash
-# Use provided script
+# Use a project's clear_soundminer_cache.sh script if it has one, e.g.:
 ./Scripts/clear_soundminer_cache.sh
 
 # Or manually:
@@ -83,21 +85,23 @@ After clearing, Soundminer will rescan all plugins on next DSP Rack access.
 ### Remove Quarantine (if present)
 
 ```bash
-xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/Unravel.vst3
+xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/<YourPlugin>.vst3
 ```
 
 ### Sign and Notarize for Distribution
 
+Every ZQ SFX project uses the shared notarization script (see `JUCE/docs/NOTARIZATION.md`):
+
 ```bash
-./Scripts/sign_and_notarize.sh
+JUCENotarizationTool/sign_and_notarize.sh --product "<PRODUCT_NAME>" --project-dir <project-dir> --build --install
 ```
 
 This script:
-1. Builds Release version
-2. Signs with Developer ID + hardened runtime
-3. Submits to Apple notary service
-4. Staples notarization ticket
-5. Installs to system plugins folder
+1. Optionally builds the Release configuration (`--build`)
+2. Signs the built bundles with Developer ID + hardened runtime
+3. Submits to Apple's notary service
+4. Staples the notarization ticket
+5. Optionally installs into `~/Library/Audio/Plug-Ins/` (`--install`)
 
 ## Known Failure Modes and Fixes
 
@@ -109,7 +113,7 @@ This script:
 - Not visible in Soundminer DSP Rack
 
 **Diagnosis:**
-Check Soundminer logs:
+Check Soundminer logs (example: Unravel):
 ```bash
 cat ~/Library/Logs/Soundminer/plugins.txt | grep -i unravel
 ```
@@ -156,7 +160,7 @@ bool isBusesLayoutSupported(const BusesLayout& layouts) const
 
 ## Release Checklist
 
-Before distributing Unravel:
+Before distributing a plugin (example: Unravel):
 
 - [ ] Build succeeds without warnings
 - [ ] pluginval passes at strictness level 10
@@ -181,11 +185,12 @@ Before distributing Unravel:
 For issues not covered here, check:
 1. Soundminer support: https://info.soundminer.com/docs
 2. JUCE Forum: https://forum.juce.com
-3. Project issues: File at repository
+3. Project issues: File at the project's own repository
 
 ## Version History
 
 | Date | Change |
 |------|--------|
-| 2026-01-14 | Initial troubleshooting guide |
+| 2026-01-14 | Initial troubleshooting guide (written against Unravel) |
 | 2026-01-14 | Added Soundminer-specific bus layout fix |
+| 2026-09-21 | Generalised for use across all ZQ SFX JUCE projects; consolidated to JUCE/docs/ |

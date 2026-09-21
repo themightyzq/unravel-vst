@@ -83,8 +83,9 @@ juce_add_plugin(Unravel
     # correctly. "Spectral" is non-standard; HPSS source separation is closest
     # to Restoration, and brightness adds an EQ stage.
     VST3_CATEGORIES "Fx" "Restoration" "EQ"
-    COMPANY_WEBSITE "https://zqsfx.com"
-    COMPANY_EMAIL "support@zqsfx.com"
+    COMPANY_WEBSITE "https://www.zq-sfx.com"
+    COMPANY_EMAIL "connect@zq-sfx.com"
+    COMPANY_COPYRIGHT "Copyright (c) 2026 ZQ SFX"
     BUNDLE_ID "com.zqsfx.unravel"
     PLUGIN_DESCRIPTION "Spectral decomposition plugin for tonal/noise separation"
 )

@@ -1,5 +1,7 @@
 # JUCE VST3 Plugin Best Practices Guide
 
+> Synced copy for this public repository. The canonical copy lives in the ZQ SFX JUCE workspace (`JUCE/docs/`); edit that one and re-sync.
+
 A comprehensive guide for building professional VST3 plugins with JUCE, including host compatibility requirements (especially Soundminer).
 
 ---
@@ -65,14 +67,15 @@ set(PLUGIN_FORMATS VST3 Standalone)
 ```cmake
 juce_add_plugin(YourPlugin
     # === COMPANY INFO ===
-    COMPANY_NAME "Your Company"
-    COMPANY_WEBSITE "https://yourcompany.com"
-    COMPANY_EMAIL "support@yourcompany.com"
+    COMPANY_NAME "ZQ SFX"
+    COMPANY_WEBSITE "https://www.zq-sfx.com"
+    COMPANY_EMAIL "connect@zq-sfx.com"
+    COMPANY_COPYRIGHT "Copyright (c) 2026 ZQ SFX"
 
     # === UNIQUE IDENTIFIERS (CRITICAL) ===
-    PLUGIN_MANUFACTURER_CODE Xxxx    # 4-char, unique per company
-    PLUGIN_CODE Yyyy                  # 4-char, unique per plugin
-    BUNDLE_ID "com.yourcompany.yourplugin"
+    PLUGIN_MANUFACTURER_CODE ZQSF     # 4-char, same for every ZQ SFX plugin
+    PLUGIN_CODE Yyyy                  # 4-char, unique per plugin — frozen once released, never change it
+    BUNDLE_ID "com.zqsfx.yourplugin"  # com.zqsfx.<product>, lowercase, no hyphen
 
     # === PLUGIN TYPE ===
     IS_SYNTH FALSE                    # TRUE for instruments
@@ -101,7 +104,7 @@ juce_add_plugin(YourPlugin
 
 | Identifier | Format | Example | Notes |
 |------------|--------|---------|-------|
-| `PLUGIN_MANUFACTURER_CODE` | 4 chars | `ZQSF` | Same for all plugins from your company |
+| `PLUGIN_MANUFACTURER_CODE` | 4 chars | `ZQSF` | Same for every ZQ SFX plugin |
 | `PLUGIN_CODE` | 4 chars | `Unrv` | Unique per plugin |
 | `BUNDLE_ID` | Reverse-domain | `com.zqsfx.unravel` | Must be globally unique |
 
