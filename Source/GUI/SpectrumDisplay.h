@@ -1,17 +1,28 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <zqsfx_ui/zqsfx_ui.h>
 #include <vector>
 #include <functional>
 #include "Theme.h"
 
 /**
- * SpectrumDisplay - Real-time spectral visualization for tonal/noise separation
+ * SpectrumDisplay - Real-time spectral visualization for tonal/transient/noise
+ * separation.
  *
  * Displays:
- * - Magnitude spectrum (gray/white)
- * - Tonal mask overlay (blue)
- * - Noise mask overlay (orange)
+ * - Magnitude spectrum (neutral LCD-green silhouette)
+ * - Tonal mask overlay (sky blue, solid outline)
+ * - Transient mask overlay (yellow, dashed outline)
+ * - Noise mask overlay (purple, dotted outline)
+ *
+ * ZQ SFX house-UI migration: the background is now the house phosphor screen
+ * (zqsfx::ui::LookAndFeel::drawScreen) instead of a flat fill, the grid is
+ * colour::lcdFaint2, and all hand-drawn text routes through the house
+ * silkFont/lcdFont via drawLcdText where the LookAndFeel can be reached (style
+ * guide section 5: "screen text via drawLcdText/lcdFont"). The three streams are
+ * distinguishable without colour: each mask region's top boundary is also stroked
+ * with a distinct line style (tonal solid, transient dashed, noise dotted).
  *
  * Features:
  * - Logarithmic/Linear frequency scaling (toggleable)
@@ -124,9 +135,8 @@ private:
     juce::String formatFrequency(float freq) const;
 
     // Colors
-    const juce::Colour backgroundColour { Theme::bgDark };                 // match the window black
-    const juce::Colour gridColour       { Theme::bgLight };                // subtle grid lines
-    const juce::Colour spectrumColour   { 0xff444444 };                    // neutral magnitude fill
+    const juce::Colour gridColour       { Theme::grid };                       // == colour::lcdFaint2 (was Theme::bgLight)
+    const juce::Colour spectrumColour   { zqsfx::ui::colour::lcdFaint };        // neutral magnitude fill (was raw 0xff444444)
     const juce::Colour tonalColour      { Theme::tonal.withAlpha(0.53f) };      // translucent tonal overlay
     const juce::Colour transientColour  { Theme::transient.withAlpha(0.6f) };   // translucent transient overlay
     const juce::Colour noiseColour      { Theme::noise.withAlpha(0.53f) };      // translucent noise overlay

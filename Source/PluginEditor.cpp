@@ -27,7 +27,7 @@ UnravelAudioProcessorEditor::UnravelAudioProcessorEditor(UnravelAudioProcessor& 
         });
     spectrumDisplay->setSampleRate(audioProcessor.getSampleRate());
     spectrumDisplay->setTooltip("Spectrum Display: Shows the frequency content of your audio. "
-                                "Blue = tonal components, Orange = noise components. "
+                                "Sky blue = tonal, yellow = transient, purple = noise components. "
                                 "Click LOG/LIN to switch between logarithmic and linear frequency scales.");
     addAndMakeVisible(spectrumDisplay.get());
 
@@ -40,10 +40,10 @@ UnravelAudioProcessorEditor::UnravelAudioProcessorEditor(UnravelAudioProcessor& 
     // Level meters (per-stream + output + limiter LED), fed from timerCallback.
     addAndMakeVisible(meterRail);
 
-    // Spectrum scale toggle button
+    // Spectrum scale toggle button. No per-instance buttonColourId/textColourOffId:
+    // the house LookAndFeel's drawButtonBackground/drawButtonText always draw from
+    // colour::btnText / colour::accent (hover) regardless of instance colours.
     scaleToggleButton.setButtonText("LOG");
-    scaleToggleButton.setColour(juce::TextButton::buttonColourId, bgMid);
-    scaleToggleButton.setColour(juce::TextButton::textColourOffId, accent);
     scaleToggleButton.setTooltip("Toggle spectrum display between logarithmic (LOG) and linear (LIN) frequency scale. "
                                   "LOG shows more detail in lower frequencies, LIN shows equal spacing.");
     scaleToggleButton.setHasFocusOutline(true);
@@ -114,20 +114,17 @@ UnravelAudioProcessorEditor::~UnravelAudioProcessorEditor()
 
 void UnravelAudioProcessorEditor::setupHeader()
 {
-    // Title
-    titleLabel.setText("UNRAVEL", juce::dontSendNotification);
-    titleLabel.setFont(juce::FontOptions(Theme::fontTitle).withStyle("Bold"));
-    titleLabel.setColour(juce::Label::textColourId, accent);
-    titleLabel.setJustificationType(juce::Justification::centredLeft);
-    addAndMakeVisible(titleLabel);
+    // Title ("UNRAVEL"): hand-drawn in drawBackground(), not a juce::Label — see the
+    // titleBounds member comment for why.
 
-    // Bypass button
+    // Bypass button. No per-instance buttonColourId/buttonOnColourId/textColourOffId/
+    // textColourOnId: the house LookAndFeel's drawButtonBackground/drawButtonText
+    // always draw an "on" TextButton as an colour::accent fill + colour::accentInk
+    // text regardless of instance colours (style guide section 6: "Active toggle is
+    // an accent fill with accentInk text" — the one house meaning for "engaged"; see
+    // docs/ui_migration_report.md for how this affects Bypass/Solo/Mute).
     bypassButton.setButtonText("BYPASS");
     bypassButton.setClickingTogglesState(true);
-    bypassButton.setColour(juce::TextButton::buttonColourId, bgLight);
-    bypassButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xffcc3333));
-    bypassButton.setColour(juce::TextButton::textColourOffId, textDim);
-    bypassButton.setColour(juce::TextButton::textColourOnId, juce::Colours::white);
     bypassButton.setTooltip("Bypass: Turn off all processing and pass audio through unchanged. "
                             "Use this to compare processed vs original sound.");
     // Accessibility: TextButton already wants keyboard focus by default; add the
@@ -140,10 +137,10 @@ void UnravelAudioProcessorEditor::setupHeader()
         audioProcessor.getAPVTS(), ParameterIDs::bypass, bypassButton);
 
     // A/B compare: label shows the ACTIVE slot; clicking stores the current
-    // settings into it and switches to the other slot.
+    // settings into it and switches to the other slot. Not a real toggle (its text,
+    // not its toggle state, carries the A/B meaning), so it always draws in the
+    // house's off/gradient state regardless of colour ids — none set here now.
     abButton.setButtonText(audioProcessor.isSlotB() ? "B" : "A");
-    abButton.setColour(juce::TextButton::buttonColourId, bgLight);
-    abButton.setColour(juce::TextButton::textColourOffId, accent);
     abButton.setTooltip("A/B compare: stores the current settings in the active slot "
                         "and switches to the other. The first press copies the current "
                         "sound over, so tweak, then toggle to compare. Cmd-Z undoes "
@@ -157,31 +154,50 @@ void UnravelAudioProcessorEditor::setupHeader()
         abButton.setButtonText(audioProcessor.isSlotB() ? "B" : "A");
     };
     addAndMakeVisible(abButton);
+
+    // Company mark, far right of the header (opposite "UNRAVEL") — also the
+    // About-box trigger (style guide section 5). LogoMark already sets its own
+    // tooltip/title/description ("About Unravel") from the productName ctor arg.
+    logo.onClick = [this] { showAboutBox(); };
+    addAndMakeVisible(logo);
+}
+
+void UnravelAudioProcessorEditor::showAboutBox()
+{
+    // ASCII-only (project rule); product name + version from the real build
+    // (JucePlugin_VersionString, generated from CMakeLists.txt's project(... VERSION
+    // ...)), not a hand-maintained literal that could drift from it.
+    juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon, "About Unravel",
+        juce::String("Unravel ") + JucePlugin_VersionString +
+            "\n\nZQ SFX - https://www.zq-sfx.com - connect@zq-sfx.com\n"
+            "Free software under GPL-3.0-or-later. Built with JUCE.\n"
+            "Fonts: Barlow Condensed, VT323, IBM Plex Mono (SIL OFL).\n"
+            "Knobs: CC0 designs from the g200kg KnobGallery.",
+        "Close", this);
 }
 
 void UnravelAudioProcessorEditor::setupKnobs()
 {
-    // All knobs share the single Theme::accent fill (the previous teal/grey/red/yellow
-    // mix carried no semantic meaning), so the helper just hardcodes it.
+    // Rotary knobs now come from the house LookAndFeel: filmstrip art picked by dial
+    // size, no per-slider fill/outline/thumb colour consulted at all (drawRotarySlider
+    // / drawVectorKnob use fixed house tokens only), so the old rotarySliderFillColourId
+    // / rotarySliderOutlineColourId / thumbColourId / textBox*ColourId sets are gone —
+    // dead code once CustomLookAndFeel stopped overriding drawRotarySlider/drawLabel.
     auto setupKnob = [this](juce::Slider& knob, juce::Label& label,
                             const juce::String& name, const juce::String& tooltip) {
         knob.setSliderStyle(juce::Slider::RotaryVerticalDrag);
         knob.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 16);
-        knob.setColour(juce::Slider::rotarySliderFillColourId, accent);
-        knob.setColour(juce::Slider::rotarySliderOutlineColourId, bgLight);
-        knob.setColour(juce::Slider::thumbColourId, accent);
-        knob.setColour(juce::Slider::textBoxTextColourId, textBright);
-        knob.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
-        knob.setColour(juce::Slider::textBoxBackgroundColourId, bgMid);
         knob.setTooltip(tooltip);
         // Accessibility: juce::Slider defaults to setWantsKeyboardFocus(false)
         // (juce_Slider.cpp), so enable it explicitly to make the knob a Tab stop.
         // Arrow keys then adjust the value; the Slider's built-in
         // AccessibilityValueInterface announces the value from its APVTS-driven
-        // text box. setTitle gives the screen reader a stable name (D-8/R10).
+        // text box. setTitle/setDescription give the screen reader a stable name and
+        // help text (D-8/R10, house accessibility floor item 1).
         knob.setWantsKeyboardFocus(true);
         knob.setHasFocusOutline(true);
         knob.setTitle(name);
+        knob.setDescription(tooltip);
         addAndMakeVisible(knob);
 
         label.setText(name, juce::dontSendNotification);
@@ -225,21 +241,23 @@ void UnravelAudioProcessorEditor::setupKnobs()
 
 void UnravelAudioProcessorEditor::setupSoloMute()
 {
+    // No per-instance buttonColourId/buttonOnColourId/textColourOffId/textColourOnId:
+    // the house LookAndFeel always draws an "on" TextButton as an colour::accent fill
+    // with colour::accentInk text, so a lit SOLO and a lit MUTE now look the same
+    // (both read as "engaged", the one house meaning for a lit toggle) — they stay
+    // distinguishable by their own permanent "SOLO"/"MUTE" caption and position, per
+    // section 3's "colour is never the only signal" (see ui_migration_report.md).
     auto setupButton = [this](juce::TextButton& btn, const juce::String& text,
-                              juce::Colour onColor, const juce::String& tooltip,
-                              const juce::String& accessibleName) {
+                              const juce::String& tooltip, const juce::String& accessibleName) {
         btn.setButtonText(text);
         btn.setClickingTogglesState(true);
-        btn.setColour(juce::TextButton::buttonColourId, bgMid);
-        btn.setColour(juce::TextButton::buttonOnColourId, onColor);
-        btn.setColour(juce::TextButton::textColourOffId, textBright);
-        btn.setColour(juce::TextButton::textColourOnId, juce::Colours::black);
         btn.setTooltip(tooltip);
         // Accessibility: the on-screen text is just "SOLO"/"MUTE" and repeats
         // across three streams, so give each button a distinct screen-reader
         // name ("Solo Tonal", "Mute Noise", ...) plus the focus ring (D-8/R10).
         btn.setHasFocusOutline(true);
         btn.setTitle(accessibleName);
+        btn.setDescription(tooltip);
         addAndMakeVisible(btn);
     };
 
@@ -250,11 +268,11 @@ void UnravelAudioProcessorEditor::setupSoloMute()
     tonalLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(tonalLabel);
 
-    setupButton(soloTonalButton, "SOLO", Theme::soloOn,
+    setupButton(soloTonalButton, "SOLO",
                 "Solo Tonal: Listen to ONLY the tonal component (harmonics, melodies, sustained sounds). "
                 "Great for checking what's being detected as tonal.",
                 "Solo Tonal");
-    setupButton(muteTonalButton, "MUTE", Theme::muteOn,
+    setupButton(muteTonalButton, "MUTE",
                 "Mute Tonal: Remove the tonal component from the output. "
                 "You'll hear only the noise/texture portion of your audio.",
                 "Mute Tonal");
@@ -271,11 +289,11 @@ void UnravelAudioProcessorEditor::setupSoloMute()
     noiseLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(noiseLabel);
 
-    setupButton(soloNoiseButton, "SOLO", Theme::soloOn,
+    setupButton(soloNoiseButton, "SOLO",
                 "Solo Noise: Listen to ONLY the noise component (transients, textures, breath, ambience). "
                 "Great for checking what's being detected as noise.",
                 "Solo Noise");
-    setupButton(muteNoiseButton, "MUTE", Theme::muteOn,
+    setupButton(muteNoiseButton, "MUTE",
                 "Mute Noise: Remove the noise component from the output. "
                 "You'll hear only the tonal/harmonic portion of your audio.",
                 "Mute Noise");
@@ -292,11 +310,11 @@ void UnravelAudioProcessorEditor::setupSoloMute()
     transientFooterLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(transientFooterLabel);
 
-    setupButton(soloTransientButton, "SOLO", Theme::soloOn,
+    setupButton(soloTransientButton, "SOLO",
                 "Solo Transient: listen to ONLY the transient component (drum hits, plosives, attacks). "
                 "Great for checking what's being detected as a transient.",
                 "Solo Transient");
-    setupButton(muteTransientButton, "MUTE", Theme::muteOn,
+    setupButton(muteTransientButton, "MUTE",
                 "Mute Transient: remove the transient component from the output. "
                 "You'll hear only the tonal + noise (sustained) content.",
                 "Mute Transient");
@@ -306,25 +324,28 @@ void UnravelAudioProcessorEditor::setupSoloMute()
     muteTransientAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         audioProcessor.getAPVTS(), ParameterIDs::muteTransient, muteTransientButton);
 
-    // Transient gain — vertical fader between the XY pad and the right edge.
+    // Transient gain — vertical fader between the XY pad and the right edge. Only
+    // trackColourId survives: CustomLookAndFeel::drawLinearSlider reads it for the
+    // fill colour (the meaning-carrying transient hue); backgroundColourId/
+    // thumbColourId/textBox*ColourId are dead now (the track/thumb are drawn from
+    // fixed house tokens, and the textbox routes through the house drawLabel's
+    // Slider-branch, which ignores textBox*ColourId entirely).
+    const juce::String transientTooltip =
+        "Transient gain: how much of the impulsive content (drum hits, "
+        "plosives, attacks) passes through. Pull down to soften attacks; "
+        "push up to emphasize them. Note: as the XY pad nears a corner, "
+        "the transient stream is scaled down with it (silent at the "
+        "exact corner) - pull the pad back toward center to restore it.";
     transientGainSlider.setSliderStyle(juce::Slider::LinearVertical);
     transientGainSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 44, 14);
     transientGainSlider.setColour(juce::Slider::trackColourId, Theme::transient);
-    transientGainSlider.setColour(juce::Slider::backgroundColourId, bgLight);
-    transientGainSlider.setColour(juce::Slider::thumbColourId, Theme::transient);
-    transientGainSlider.setColour(juce::Slider::textBoxTextColourId, textBright);
-    transientGainSlider.setColour(juce::Slider::textBoxBackgroundColourId, bgMid);
-    transientGainSlider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
-    transientGainSlider.setTooltip("Transient gain: how much of the impulsive content (drum hits, "
-                                   "plosives, attacks) passes through. Pull down to soften attacks; "
-                                   "push up to emphasize them. Note: as the XY pad nears a corner, "
-                                   "the transient stream is scaled down with it (silent at the "
-                                   "exact corner) - pull the pad back toward center to restore it.");
+    transientGainSlider.setTooltip(transientTooltip);
     // Accessibility: juce::Slider defaults to no keyboard focus — enable it,
     // add the focus ring, and name it for the screen reader (D-8/R10).
     transientGainSlider.setWantsKeyboardFocus(true);
     transientGainSlider.setHasFocusOutline(true);
     transientGainSlider.setTitle("Transient Gain");
+    transientGainSlider.setDescription(transientTooltip);
     addAndMakeVisible(transientGainSlider);
 
     // Effective-gain readout: the pad-corner knee can pull the audible
@@ -371,10 +392,9 @@ void UnravelAudioProcessorEditor::setupPresets()
     presetSelector.addItem("Transient Punch", 8);
     presetSelector.setTextWhenNothingSelected("Presets");
     presetSelector.setSelectedId(0, juce::dontSendNotification);
-    presetSelector.setColour(juce::ComboBox::backgroundColourId, bgLight);
-    presetSelector.setColour(juce::ComboBox::textColourId, textBright);
-    presetSelector.setColour(juce::ComboBox::outlineColourId, bgLight);
-    presetSelector.setColour(juce::ComboBox::arrowColourId, accent);
+    // No per-instance backgroundColourId/textColourId/outlineColourId/arrowColourId:
+    // the house LookAndFeel's drawComboBox always draws the LCD-dropdown treatment
+    // (colour::lcdBg/lcdBorder/lcdText/lcdDim) regardless of instance colours.
     presetSelector.setTooltip("Quick Presets: load a starting point (this sets ALL controls). "
                               "'Default' resets to neutral. 'Extract Tonal' isolates melodies/harmonics. "
                               "'Extract Noise' isolates textures/ambience. 'Gentle' gives subtle separation.");
@@ -467,12 +487,24 @@ void UnravelAudioProcessorEditor::paint(juce::Graphics& g)
 
 void UnravelAudioProcessorEditor::drawBackground(juce::Graphics& g)
 {
-    g.fillAll(bgDark);
+    // Editor chrome: the house chassis gradient (style guide section 5 / Phase1 item
+    // 5), not a flat fill.
+    g.setGradientFill(zqsfx::ui::gradients::chassis(getLocalBounds().toFloat()));
+    g.fillAll();
+
+    // "UNRAVEL" wordmark: hand-drawn, bespoke bold treatment (see the titleBounds
+    // member comment for why this stays off the house silk font), logoBright per
+    // Tokens.h ("wordmark") — never accent, which means "active" and nothing else.
+    g.setFont(juce::FontOptions(Theme::fontTitle).withStyle("Bold"));
+    g.setColour(zqsfx::ui::colour::logoBright);
+    g.drawText("UNRAVEL", titleBounds, juce::Justification::centredLeft, false);
 }
 
 void UnravelAudioProcessorEditor::drawSectionDividers(juce::Graphics& g)
 {
-    g.setColour(bgLight);
+    // Hairlines: colour::ruleTitle (style guide: "outlines -> ruleTitle/panelBorder"),
+    // not Theme::bgLight (== panelTop, a panel FACE colour, not a hairline colour).
+    g.setColour(zqsfx::ui::colour::ruleTitle);
 
     auto bounds = getLocalBounds();
 
@@ -498,7 +530,16 @@ void UnravelAudioProcessorEditor::resized()
 
     // === HEADER ===
     auto header = bounds.removeFromTop(headerHeight).reduced(padding, 0);
-    titleLabel.setBounds(header.removeFromLeft(90).withTrimmedTop(10));
+    // Justification::centredLeft in drawBackground() centers the wordmark vertically
+    // within the full header slice, so titleBounds needs no manual top-trim.
+    titleBounds = header.removeFromLeft(90);
+
+    // Company mark at the FAR right of the header (opposite the wordmark, style guide
+    // section 5), reserved before Bypass/A-B so it's always the rightmost element even
+    // at the minimum window width. Never shrinks (Phase1 item 6: shrink the title
+    // before the logo if the header is ever tight).
+    auto logoArea = header.removeFromRight(36);
+    logo.setBounds(logoArea.withSizeKeepingCentre(28, 28));
 
     // Right side: Bypass button (wide enough that "BYPASS" isn't clipped)
     // with the A/B slot toggle beside it.

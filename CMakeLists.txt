@@ -32,6 +32,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Add JUCE
 add_subdirectory(JUCE)
 
+# The ZQ SFX house UI (tokens, LookAndFeel, bound controls, embedded OFL fonts). Must
+# come AFTER JUCE, so its own CMakeLists can detect the juce::juce_gui_basics target
+# add_subdirectory(JUCE) just created and skip fetching its own copy of JUCE. Pinned
+# by tag: bump deliberately, then re-run unravel_ui_snapshot and compare.
+include(FetchContent)
+FetchContent_Declare(zqsfx_ui
+    GIT_REPOSITORY https://github.com/themightyzq/zqsfx_ui.git
+    GIT_TAG v0.2.1
+    GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(zqsfx_ui)
+
 # Resolve COPY_PLUGIN_AFTER_BUILD before juce_add_plugin reads it.
 # In CI the system plugin folder is unwritable (Windows requires admin) and
 # uninteresting (CI uploads artefacts rather than installing).
@@ -147,6 +158,7 @@ target_link_libraries(Unravel
         juce::juce_graphics
         juce::juce_gui_basics
         juce::juce_gui_extra
+        zqsfx::ui
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
@@ -169,4 +181,21 @@ target_compile_definitions(Unravel
 set_target_properties(Unravel PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
+
+# ---- UI snapshot tool (headless before/after render gate for the zqsfx_ui migration) ----
+# pamplejuce pattern: link against the plugin's own shared-code target ("Unravel", produced by
+# juce_add_plugin above) instead of recompiling PluginProcessor.cpp/PluginEditor.cpp a second
+# time. juce_generate_juce_header(Unravel)'s generated JuceHeader.h is only added to Unravel's
+# OWN include path as PRIVATE (see JUCEUtils.cmake), so it does not propagate through
+# target_link_libraries; it is added back explicitly below via JUCE_GENERATED_SOURCES_DIRECTORY.
+juce_add_console_app(unravel_ui_snapshot PRODUCT_NAME "unravel_ui_snapshot")
+target_sources(unravel_ui_snapshot PRIVATE tools/ui_snapshot/main.cpp)
+target_include_directories(unravel_ui_snapshot PRIVATE
+    Source
+    $<TARGET_PROPERTY:Unravel,JUCE_GENERATED_SOURCES_DIRECTORY>)
+target_link_libraries(unravel_ui_snapshot PRIVATE
+    Unravel
+    zqsfx::ui
+    juce::juce_audio_utils
+    juce::juce_dsp)
 

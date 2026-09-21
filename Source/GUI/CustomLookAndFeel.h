@@ -1,46 +1,39 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <zqsfx_ui/zqsfx_ui.h>
 #include "Theme.h"
 
 /**
- * CustomLookAndFeel — Unravel's themed look, drawn from the shared Theme tokens.
+ * CustomLookAndFeel — Unravel's themed look.
  *
- * Replaces JUCE's stock control rendering so the rotary knobs, buttons, and the
- * preset combo box match the bespoke XY pad / spectrum aesthetic instead of the
- * framework defaults. Applied once on the editor (cascades to all child controls).
+ * ZQ SFX house-UI migration: this is now a THIN SUBCLASS of zqsfx::ui::LookAndFeel.
+ * The house LookAndFeel supplies rotary knobs (CC0 filmstrips, picked by dial size),
+ * combo boxes (LCD dropdowns), buttons (gradient face, accent-on, accent hover
+ * legend), and slider text-box readouts (LCD glass + glow) automatically once its
+ * drawRotarySlider / drawComboBox / positionComboBoxText / drawLabel /
+ * drawButtonBackground / drawButtonText / createFocusOutlineForComponent are left
+ * un-overridden. This subclass keeps only the ONE override the house LookAndFeel has
+ * no equivalent for: the linear Transient-gain fader, restyled with house tokens
+ * (hard-edged rectangle track, no rounded pill/corner radius — style guide section 6).
+ * Unravel has no juce::ToggleButton usage (its toggles are TextButtons with
+ * setClickingTogglesState), so unlike LFlOw's subclass there is no drawToggleButton
+ * override to keep either.
  */
-class CustomLookAndFeel : public juce::LookAndFeel_V4
+class CustomLookAndFeel : public zqsfx::ui::LookAndFeel
 {
 public:
     CustomLookAndFeel();
     ~CustomLookAndFeel() override = default;
 
-    void drawRotarySlider(juce::Graphics& g, int x, int y, int width, int height,
-                          float sliderPosProportional, float rotaryStartAngle,
-                          float rotaryEndAngle, juce::Slider& slider) override;
-
+    // ---- Linear slider (Transient-gain vertical fader only): the house LookAndFeel
+    // has no drawLinearSlider override, so this stays — screen-glass track in
+    // lcdScreenDark with a ruleTitle border, filled portion in the slider's own
+    // colour (trackColourId, set to Theme::transient at the call site), slim
+    // rectangular thumb in colour::pointer — no stock white ball, no rounded pill.
     void drawLinearSlider(juce::Graphics& g, int x, int y, int width, int height,
                           float sliderPos, float minSliderPos, float maxSliderPos,
                           juce::Slider::SliderStyle style, juce::Slider& slider) override;
-
-    void drawButtonBackground(juce::Graphics& g, juce::Button& button,
-                              const juce::Colour& backgroundColour,
-                              bool shouldDrawButtonAsHighlighted,
-                              bool shouldDrawButtonAsDown) override;
-
-    void drawComboBox(juce::Graphics& g, int width, int height, bool isButtonDown,
-                      int buttonX, int buttonY, int buttonW, int buttonH,
-                      juce::ComboBox& box) override;
-
-    juce::Font getTextButtonFont(juce::TextButton&, int buttonHeight) override;
-    juce::Font getComboBoxFont(juce::ComboBox&) override;
-
-    // Keyboard-focus indicator. Any control that calls setHasFocusOutline(true)
-    // gets this drawn around it while it holds keyboard focus (Desktop drives it
-    // via createFocusOutlineForComponent on every focus change). We draw a 2px
-    // Theme::accent ring so keyboard users can see where focus is (D-8/R10).
-    std::unique_ptr<juce::FocusOutline> createFocusOutlineForComponent(juce::Component&) override;
 
 private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CustomLookAndFeel)

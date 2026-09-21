@@ -1,6 +1,58 @@
 #include "SpectrumDisplay.h"
 #include <cmath>
 
+namespace
+{
+    // Every string this component draws by hand goes through the house LookAndFeel's
+    // lcdFont/drawLcdText (the phosphor-screen face + glow) when one is installed,
+    // falling back to a plain generic-font drawText otherwise so this never crashes or
+    // draws nothing if some other LookAndFeel is ever active (style guide section 4:
+    // "screen text via drawLcdText/lcdFont").
+    void drawScreenText(juce::Graphics& g, juce::Component& c, const juce::String& text,
+                        juce::Rectangle<int> area, float px, juce::Justification just,
+                        juce::Colour col)
+    {
+        if (auto* lnf = dynamic_cast<zqsfx::ui::LookAndFeel*>(&c.getLookAndFeel()))
+            lnf->drawLcdText(g, text, area, px, just, col);
+        else
+        {
+            g.setFont(juce::FontOptions(px));
+            g.setColour(col);
+            g.drawText(text, area, just);
+        }
+    }
+
+    // Stroke a stream's mask-region boundary with a distinct line style so the three
+    // streams are distinguishable without colour (style guide section 3 rule 2):
+    // tonal solid, transient dashed, noise dotted.
+    void strokeStreamBoundary(juce::Graphics& g, const juce::Path& boundary, juce::Colour colour,
+                              int streamIndex)
+    {
+        constexpr float thickness = 1.5f;
+        if (streamIndex == 0) // tonal: solid
+        {
+            g.setColour(colour);
+            g.strokePath(boundary, juce::PathStrokeType(thickness));
+            return;
+        }
+
+        juce::Path dashed;
+        if (streamIndex == 1) // transient: dashed
+        {
+            float dashLengths[] = { 6.0f, 3.0f };
+            juce::PathStrokeType(thickness).createDashedStroke(dashed, boundary, dashLengths, 2);
+        }
+        else // noise: dotted
+        {
+            float dashLengths[] = { 1.5f, 2.5f };
+            juce::PathStrokeType(thickness, juce::PathStrokeType::curved, juce::PathStrokeType::rounded)
+                .createDashedStroke(dashed, boundary, dashLengths, 2);
+        }
+        g.setColour(colour);
+        g.fillPath(dashed);
+    }
+}
+
 SpectrumDisplay::SpectrumDisplay()
 {
     setOpaque(true);
@@ -11,7 +63,8 @@ SpectrumDisplay::SpectrumDisplay()
     // Accessibility support
     setAccessible(true);
     setTitle("Spectrum Display");
-    setDescription("Real-time frequency visualization showing tonal (blue) and noise (orange) components.");
+    setDescription("Real-time frequency visualization showing tonal (sky blue, solid), "
+                   "transient (yellow, dashed), and noise (purple, dotted) components.");
 }
 
 SpectrumDisplay::~SpectrumDisplay()
@@ -117,9 +170,8 @@ void SpectrumDisplay::paint(juce::Graphics& g)
 
     if (!isEnabled)
     {
-        g.setColour(Theme::textDim.darker(0.3f));
-        g.setFont(juce::FontOptions(Theme::fontLabel));
-        g.drawText("Spectrum Display", getLocalBounds(), juce::Justification::centred);
+        drawScreenText(g, *this, "Spectrum Display", getLocalBounds(), Theme::fontLabel,
+                      juce::Justification::centred, Theme::textDim.darker(0.3f));
         return;
     }
 
@@ -138,11 +190,10 @@ void SpectrumDisplay::paint(juce::Graphics& g)
     // display is alive and waiting rather than just showing a flat line.
     if (!hasSignal_)
     {
-        g.setColour(Theme::textDim);
-        g.setFont(juce::FontOptions(Theme::fontSmall));
         // ASCII only: a raw UTF-8 ellipsis in a char* literal goes through
         // juce::String's Latin-1 constructor and renders as mojibake.
-        g.drawText("Waiting for audio...", getLocalBounds(), juce::Justification::centred);
+        drawScreenText(g, *this, "Waiting for audio...", getLocalBounds(), Theme::fontSmall,
+                      juce::Justification::centred, Theme::textDim);
     }
 }
 
@@ -153,14 +204,18 @@ void SpectrumDisplay::resized()
 
 void SpectrumDisplay::drawBackground(juce::Graphics& g)
 {
-    g.fillAll(backgroundColour);
+    // House phosphor-screen treatment (bezel + LCD glass + scanlines) instead of a
+    // flat fill (style guide section 5: custom displays get the screen background).
+    zqsfx::ui::LookAndFeel::drawScreen(g, getLocalBounds().toFloat(), true);
 
     auto bounds = getLocalBounds().toFloat();
     const float width = bounds.getWidth();
     const float height = bounds.getHeight();
 
-    // Draw frequency grid lines (logarithmic)
-    g.setColour(gridColour);
+    // Draw frequency grid lines (logarithmic). gridColour == colour::lcdFaint2; drawn
+    // at reduced alpha so the grid stays subtle against the phosphor glow rather than
+    // as strong as the mask outlines drawn on top of it.
+    g.setColour(gridColour.withAlpha(0.5f));
 
     // Draw dB grid lines
     for (float db = minDb; db <= maxDb; db += 20.0f)
@@ -227,8 +282,8 @@ void SpectrumDisplay::drawMasks(juce::Graphics& g)
         return;
 
     // Bottom "mask ribbon": at each frequency the band [bandTop..bottom] is split
-    // into the three streams' actual shares — tonal (blue) at the bottom,
-    // transient (yellow) in the middle, noise (orange) on top. Because the masks
+    // into the three streams' actual shares — tonal (sky blue) at the bottom,
+    // transient (yellow) in the middle, noise (purple) on top. Because the masks
     // are mass-conserving (tonal + transient + noise = 1), the three regions
     // exactly fill the band, faithfully showing the per-frequency split.
     // The band height itself is weighted by the bin's magnitude (0 at the
@@ -265,7 +320,7 @@ void SpectrumDisplay::drawMasks(juce::Graphics& g)
     // to x=0 would slope diagonally and leave a visible mass-conservation gap
     // in the leftmost (~5% in LOG mode) strip.
 
-    // Noise share (orange): energy-weighted stack top down to the tonal+transient split.
+    // Noise share (purple): energy-weighted stack top down to the tonal+transient split.
     juce::Path noisePath;
     noisePath.startNewSubPath(0.0f, ribbonTopY(1));
     for (int bin = 1; bin < cachedNumBins; ++bin)
@@ -289,7 +344,7 @@ void SpectrumDisplay::drawMasks(juce::Graphics& g)
     g.setColour(transientColour);
     g.fillPath(transientPath);
 
-    // Tonal share (blue): between the tonal top curve and the bottom (straight).
+    // Tonal share (sky blue): between the tonal top curve and the bottom (straight).
     juce::Path tonalPath;
     tonalPath.startNewSubPath(0.0f, height);
     tonalPath.lineTo(width, height);
@@ -299,6 +354,29 @@ void SpectrumDisplay::drawMasks(juce::Graphics& g)
     tonalPath.closeSubPath();
     g.setColour(tonalColour);
     g.fillPath(tonalPath);
+
+    // Non-colour cue (style guide section 3 rule 2 / accessibility floor item 5):
+    // stroke each stream's own top boundary curve with a distinct line style so the
+    // three streams stay distinguishable under a colour-blindness simulation, not
+    // just by hue — tonal solid, transient dashed, noise dotted. Built as OPEN paths
+    // (not the closed fill regions above) so each reads as a single curve.
+    juce::Path tonalBoundary;
+    tonalBoundary.startNewSubPath(0.0f, splitTonalY(1));
+    for (int bin = 1; bin < cachedNumBins; ++bin)
+        tonalBoundary.lineTo(binToX(bin, cachedNumBins, width), splitTonalY(bin));
+    strokeStreamBoundary(g, tonalBoundary, Theme::tonal, 0);
+
+    juce::Path transientBoundary;
+    transientBoundary.startNewSubPath(0.0f, splitTransientY(1));
+    for (int bin = 1; bin < cachedNumBins; ++bin)
+        transientBoundary.lineTo(binToX(bin, cachedNumBins, width), splitTransientY(bin));
+    strokeStreamBoundary(g, transientBoundary, Theme::transient, 1);
+
+    juce::Path noiseBoundary;
+    noiseBoundary.startNewSubPath(0.0f, ribbonTopY(1));
+    for (int bin = 1; bin < cachedNumBins; ++bin)
+        noiseBoundary.lineTo(binToX(bin, cachedNumBins, width), ribbonTopY(bin));
+    strokeStreamBoundary(g, noiseBoundary, Theme::noise, 2);
 }
 
 void SpectrumDisplay::drawLabels(juce::Graphics& g)
@@ -306,38 +384,38 @@ void SpectrumDisplay::drawLabels(juce::Graphics& g)
     auto bounds = getLocalBounds().toFloat();
     const float height = bounds.getHeight();
 
-    g.setColour(Theme::textDim);
-    g.setFont(juce::FontOptions(10.0f));    // Minimum readable size
-
     // dB labels on right side — same dbToY mapping as the grid lines in
     // drawBackground, so each label sits exactly on its line. The 0 dB label
-    // is nudged inside the top edge instead of skipped.
+    // is nudged inside the top edge instead of skipped. LCD readout style
+    // (numeric value on the phosphor screen).
     for (float db = minDb + 20.0f; db <= maxDb; db += 20.0f)
     {
         const float y = dbToY(db, height);
         const int textY = juce::jlimit(2, getHeight() - 28, static_cast<int>(y) - 6);
-        g.drawText(juce::String(static_cast<int>(db)) + " dB",
-                  getWidth() - 35, textY, 30, 12,
-                  juce::Justification::right);
+        drawScreenText(g, *this, juce::String(static_cast<int>(db)) + " dB",
+                      { getWidth() - 35, textY, 30, 12 },
+                      10.0f, juce::Justification::right, Theme::textDim);
     }
 
-    // Legend at top — three streams, in the same order as the ribbon stacks
+    // Legend at top — three streams, in the same order as the ribbon stacks. Each
+    // swatch is followed by its name (colour is never the only signal — the dash
+    // pattern on the curve itself is the other cue, per strokeStreamBoundary above).
     const int legendY = 5;
 
     g.setColour(tonalColour.withAlpha(1.0f));
     g.fillRect(5, legendY, 8, 8);
-    g.setColour(Theme::textDim);
-    g.drawText("Tonal", 15, legendY - 1, 50, 12, juce::Justification::left);
+    drawScreenText(g, *this, "Tonal", { 15, legendY - 1, 50, 12 }, 10.0f,
+                  juce::Justification::left, Theme::textDim);
 
     g.setColour(transientColour.withAlpha(1.0f));
     g.fillRect(60, legendY, 8, 8);
-    g.setColour(Theme::textDim);
-    g.drawText("Transient", 70, legendY - 1, 60, 12, juce::Justification::left);
+    drawScreenText(g, *this, "Transient", { 70, legendY - 1, 60, 12 }, 10.0f,
+                  juce::Justification::left, Theme::textDim);
 
     g.setColour(noiseColour.withAlpha(1.0f));
     g.fillRect(130, legendY, 8, 8);
-    g.setColour(Theme::textDim);
-    g.drawText("Noise", 140, legendY - 1, 50, 12, juce::Justification::left);
+    drawScreenText(g, *this, "Noise", { 140, legendY - 1, 50, 12 }, 10.0f,
+                  juce::Justification::left, Theme::textDim);
 
     // Draw frequency labels
     drawFrequencyLabels(g);
@@ -348,9 +426,6 @@ void SpectrumDisplay::drawFrequencyLabels(juce::Graphics& g)
     auto bounds = getLocalBounds();
     const float width = static_cast<float>(bounds.getWidth());
     const int labelY = bounds.getHeight() - 14;
-
-    g.setColour(Theme::textDim);
-    g.setFont(juce::FontOptions(10.0f));    // Minimum readable size
 
     // Musical frequency markers, positioned with the same freqToX mapping the
     // spectrum and grid use (so labels sit exactly under their grid lines in
@@ -364,9 +439,9 @@ void SpectrumDisplay::drawFrequencyLabels(juce::Graphics& g)
         {
             const float x = freqToX(freq, width);
             if (x > 25.0f && x < width - 35.0f)
-                g.drawText(formatFrequency(freq),
-                          static_cast<int>(x) - 20, labelY, 40, 12,
-                          juce::Justification::centred);
+                drawScreenText(g, *this, formatFrequency(freq),
+                              { static_cast<int>(x) - 20, labelY, 40, 12 },
+                              10.0f, juce::Justification::centred, Theme::textDim);
         }
     }
 }

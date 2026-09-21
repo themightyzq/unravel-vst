@@ -1,12 +1,34 @@
 #include "XYPad.h"
 #include "Theme.h"
 #include "../Parameters/ParameterDefinitions.h"
+#include <zqsfx_ui/zqsfx_ui.h>
+
+namespace
+{
+    // This bespoke display keeps working exactly as it did (spec requirement): only
+    // its colours, background (phosphor screen), fonts, and corner radii change. Every
+    // string it draws by hand routes through the house LookAndFeel's lcdFont/
+    // drawLcdText when one is installed (style guide section 4), falling back to a
+    // plain generic-font drawText otherwise.
+    void drawScreenText(juce::Graphics& g, juce::Component& c, const juce::String& text,
+                        juce::Rectangle<int> area, float px, juce::Justification just,
+                        juce::Colour col)
+    {
+        if (auto* lnf = dynamic_cast<zqsfx::ui::LookAndFeel*>(&c.getLookAndFeel()))
+            lnf->drawLcdText(g, text, area, px, just, col);
+        else
+        {
+            g.setFont(juce::FontOptions(px));
+            g.setColour(col);
+            g.drawText(text, area, just);
+        }
+    }
+}
 
 XYPad::XYPad(juce::AudioProcessorValueTreeState& apvts_)
     : apvts(apvts_)
 {
-    // Colours from the shared Theme palette (one tonal blue / noise orange / accent).
-    backgroundColour = Theme::bgMid;
+    // Colours from the shared Theme palette (tonal sky blue / noise purple / accent).
     gridColour = Theme::grid;
     thumbColour = Theme::accent;
     thumbHighlightColour = Theme::accentHi;
@@ -43,11 +65,12 @@ XYPad::XYPad(juce::AudioProcessorValueTreeState& apvts_)
     apvts.addParameterListener(ParameterIDs::tonalGain, this);
     apvts.addParameterListener(ParameterIDs::noisyGain, this);
 
-    // Set up zoom control buttons
+    // Set up zoom control buttons. No per-instance buttonColourId/textColourOffId:
+    // the house LookAndFeel's drawButtonBackground/drawButtonText always draw from
+    // colour::btnText / colour::accent (hover) regardless of instance colours, so
+    // those calls were dead once CustomLookAndFeel stopped overriding them.
     auto setupZoomButton = [this](juce::TextButton& btn, const juce::String& text, const juce::String& tooltip) {
         btn.setButtonText(text);
-        btn.setColour(juce::TextButton::buttonColourId, backgroundColour.darker(0.2f));
-        btn.setColour(juce::TextButton::textColourOffId, thumbColour);
         btn.setTooltip(tooltip);
         // Keep the zoom controls out of the keyboard Tab order so the XY pad reads
         // as a single focus stop (D-8/R10). Zoom is a view-only convenience — the
@@ -65,8 +88,12 @@ XYPad::XYPad(juce::AudioProcessorValueTreeState& apvts_)
     zoomOutButton.onClick = [this]() { zoomOut(); };
     zoomResetButton.onClick = [this]() { resetZoom(); };
 
-    // Enable keyboard focus for accessibility
+    // Enable keyboard focus for accessibility. setHasFocusOutline routes the ring
+    // through the house LookAndFeel (createFocusOutlineForComponent) instead of the
+    // hand-drawn ring paint() used to draw itself (style guide section 8 / Phase1
+    // item 8: "Focus rings come from the house LookAndFeel; do not draw your own").
     setWantsKeyboardFocus(true);
+    setHasFocusOutline(true);
     setAccessible(true);
     setTitle("Mix Control XY Pad");
     setDescription("2D control for Tonal and Noise gain. Horizontal = Tonal gain, Vertical = Noise gain. "
@@ -98,8 +125,11 @@ XYPad::~XYPad()
 
 void XYPad::paint(juce::Graphics& g)
 {
-    // Background
-    g.fillAll(backgroundColour);
+    // Background: house phosphor screen (bezel + LCD glass + scanlines) instead of a
+    // flat fill — the XY pad is one of the "custom displays" the style guide names
+    // explicitly (section 5). Scanlines off: this is a large interactive control, not
+    // a small readout, and the pad's own grid/gradients already carry plenty of detail.
+    zqsfx::ui::LookAndFeel::drawScreen(g, getLocalBounds().toFloat(), false);
 
     // Draw dark boundary fill outside parameter limits when zoomed
     drawBoundaryFill(g);
@@ -112,12 +142,12 @@ void XYPad::paint(juce::Graphics& g)
     auto bounds = getLocalBounds().toFloat();
 
     // Use the shared tonal/noise tokens (the gradients and axis bars previously
-    // hardcoded a different blue/orange than the rest of the pad).
+    // hardcoded a different blue/orange than the rest of the pad; noise is purple now).
     const juce::Colour tonalHigh = tonalColour;
     const juce::Colour noiseHigh = noiseColour;
 
     // Strong overlapping gradients - clearly visible even when blended
-    // Tonal gradient (left to right) - blue builds toward right
+    // Tonal gradient (left to right) - sky blue builds toward right
     juce::ColourGradient tonalGradient(
         tonalHigh.withAlpha(0.0f), bounds.getX(), bounds.getCentreY(),
         tonalHigh.withAlpha(0.4f), bounds.getRight(), bounds.getCentreY(),
@@ -125,7 +155,7 @@ void XYPad::paint(juce::Graphics& g)
     g.setGradientFill(tonalGradient);
     g.fillRect(bounds);
 
-    // Noise gradient (bottom to top) - orange builds toward top
+    // Noise gradient (bottom to top) - purple builds toward top
     juce::ColourGradient noiseGradient(
         noiseHigh.withAlpha(0.0f), bounds.getCentreX(), bounds.getBottom(),
         noiseHigh.withAlpha(0.4f), bounds.getCentreX(), bounds.getY(),
@@ -136,27 +166,30 @@ void XYPad::paint(juce::Graphics& g)
     // Solid axis indicator bars - always visible "legend" for the axes
     const float barWidth = 6.0f;
 
-    // Right edge bar - solid blue (Tonal axis indicator)
+    // Right edge bar - solid sky blue (Tonal axis indicator)
     g.setColour(tonalHigh.withAlpha(0.85f));
     g.fillRect(juce::Rectangle<float>(bounds.getRight() - barWidth, bounds.getY(),
                                         barWidth, bounds.getHeight()));
 
-    // Top edge bar - solid orange (Noise axis indicator)
+    // Top edge bar - solid purple (Noise axis indicator)
     g.setColour(noiseHigh.withAlpha(0.85f));
     g.fillRect(juce::Rectangle<float>(bounds.getX(), bounds.getY(),
                                         bounds.getWidth(), barWidth));
 
-    // Small corner labels on the bars for extra clarity
-    g.setFont(juce::FontOptions(9.0f).withStyle("Bold"));
+    // Small corner labels on the bars for extra clarity. logoBright (not accent —
+    // accent means "active", never a plain label) gives strong contrast against
+    // either saturated axis-bar colour.
+    // "T" label on the sky-blue bar (Tonal)
+    drawScreenText(g, *this, "T",
+                  { juce::roundToInt(bounds.getRight() - barWidth - 1), juce::roundToInt(bounds.getCentreY() - 6.0f),
+                    juce::roundToInt(barWidth + 2), 12 },
+                  11.0f, juce::Justification::centred, zqsfx::ui::colour::logoBright);
 
-    // "T" label on blue bar (Tonal)
-    g.setColour(juce::Colours::white);
-    g.drawText("T", juce::Rectangle<float>(bounds.getRight() - barWidth - 1, bounds.getCentreY() - 6,
-                                            barWidth + 2, 12), juce::Justification::centred, false);
-
-    // "N" label on orange bar (Noise)
-    g.drawText("N", juce::Rectangle<float>(bounds.getCentreX() - 6, bounds.getY(),
-                                            12, barWidth + 2), juce::Justification::centred, false);
+    // "N" label on the purple bar (Noise)
+    drawScreenText(g, *this, "N",
+                  { juce::roundToInt(bounds.getCentreX() - 6.0f), juce::roundToInt(bounds.getY()), 12,
+                    juce::roundToInt(barWidth + 2) },
+                  11.0f, juce::Justification::centred, zqsfx::ui::colour::logoBright);
 
     // Draw labels
     drawLabels(g);
@@ -173,14 +206,11 @@ void XYPad::paint(juce::Graphics& g)
     // Draw zoom indicator when zoomed in
     if (zoomLevel_ > 1.0f)
     {
-        g.setColour(thumbColour.withAlpha(0.8f));
-        g.setFont(juce::FontOptions(11.0f));
         juce::String zoomText = juce::String(zoomLevel_, 1) + "x";
-        g.drawText(zoomText,
-                   static_cast<int>(bounds.getRight()) - 70,   // Moved left to avoid buttons
-                   static_cast<int>(bounds.getY()) + 6,
-                   34, 14,
-                   juce::Justification::right);
+        drawScreenText(g, *this, zoomText,
+                      { static_cast<int>(bounds.getRight()) - 70,   // Moved left to avoid buttons
+                        static_cast<int>(bounds.getY()) + 6, 34, 14 },
+                      12.0f, juce::Justification::right, thumbColour.withAlpha(0.8f));
     }
 
     // Draw axis labels
@@ -192,16 +222,10 @@ void XYPad::paint(juce::Graphics& g)
     // Draw boundary flash when panning hits edge
     drawBoundaryFlash(g);
 
-    // Border
-    g.setColour(gridColour);
-    g.drawRect(getLocalBounds(), 1);
-
-    // Focus ring for accessibility
-    if (hasFocus_)
-    {
-        g.setColour(thumbColour.withAlpha(0.6f));
-        g.drawRect(getLocalBounds().reduced(2), 3);  // Increased from 2 to 3 for better visibility
-    }
+    // No manual border or focus ring here any more: zqsfx::ui::LookAndFeel::drawScreen
+    // (called at the top of this method) already draws the screen's own bezel/border,
+    // and setHasFocusOutline(true) (see the constructor) routes keyboard focus through
+    // the house LookAndFeel's own accent ring instead of a hand-drawn one.
 }
 
 void XYPad::resized()
@@ -599,8 +623,6 @@ void XYPad::drawGrid(juce::Graphics& g)
     };
 
     // Draw grid lines with dB labels when zoomed in
-    g.setFont(juce::FontOptions(9.0f));
-
     for (float norm = 0.0f; norm <= 1.0f + normStep * 0.5f; norm += normStep)
     {
         float clampedNorm = juce::jlimit(0.0f, 1.0f, norm);
@@ -620,10 +642,9 @@ void XYPad::drawGrid(juce::Graphics& g)
             if (isMajor && zoomLevel_ >= 2.0f && screenPos.x > bounds.getX() + 30.0f && screenPos.x < bounds.getRight() - 30.0f)
             {
                 juce::String label = (db >= 0 ? "+" : "") + juce::String(static_cast<int>(db));
-                g.setColour(tonalColour.withAlpha(0.85f));
-                g.drawText(label,
-                           juce::Rectangle<float>(screenPos.x - 12.0f, bounds.getBottom() - 24.0f, 24.0f, 10.0f),
-                           juce::Justification::centred, false);
+                drawScreenText(g, *this, label,
+                              { juce::roundToInt(screenPos.x - 12.0f), juce::roundToInt(bounds.getBottom() - 24.0f), 24, 10 },
+                              10.0f, juce::Justification::centred, tonalColour.withAlpha(0.85f));
             }
         }
 
@@ -642,10 +663,9 @@ void XYPad::drawGrid(juce::Graphics& g)
             if (isMajor && zoomLevel_ >= 2.0f && screenPos.y > bounds.getY() + 20.0f && screenPos.y < bounds.getBottom() - 40.0f)
             {
                 juce::String label = (db >= 0 ? "+" : "") + juce::String(static_cast<int>(db));
-                g.setColour(noiseColour.withAlpha(0.85f));
-                g.drawText(label,
-                           juce::Rectangle<float>(bounds.getX() + 4.0f, screenPos.y - 5.0f, 24.0f, 10.0f),
-                           juce::Justification::left, false);
+                drawScreenText(g, *this, label,
+                              { juce::roundToInt(bounds.getX() + 4.0f), juce::roundToInt(screenPos.y - 5.0f), 24, 10 },
+                              10.0f, juce::Justification::left, noiseColour.withAlpha(0.85f));
             }
         }
     }
@@ -705,8 +725,6 @@ void XYPad::drawLabels(juce::Graphics& g)
     float topNoiseDb = kMinDb + (1.0f - visibleMinY) * kDbRange;
     float bottomNoiseDb = kMinDb + (1.0f - visibleMaxY) * kDbRange;
 
-    g.setFont(juce::FontOptions(11.0f));  // Improved readability
-
     if (zoomLevel_ > 1.0f)
     {
         // When zoomed, show actual dB values at corners
@@ -714,65 +732,59 @@ void XYPad::drawLabels(juce::Graphics& g)
             if (db <= (kMinDb + 0.1f)) return "-inf";
             return juce::String(db, 0) + "dB";
         };
+        auto corner = [&](const juce::String& text, float x, float y, float w, float h,
+                          juce::Justification j, juce::Colour col)
+        {
+            drawScreenText(g, *this, text,
+                          { juce::roundToInt(x), juce::roundToInt(y), juce::roundToInt(w), juce::roundToInt(h) },
+                          11.0f, j, col);
+        };
+
+        const auto tonalCol = tonalColour.withAlpha(0.85f);
+        const auto noiseCol = noiseColour.withAlpha(0.85f);
 
         // Top-left corner: left tonal dB, top noise dB
-        g.setColour(tonalColour.withAlpha(0.85f));
-        g.drawText("T:" + formatDb(leftTonalDb),
-                   juce::Rectangle<float>(bounds.getX() + 4.0f, bounds.getY() + 4.0f, 55.0f, 12.0f),
-                   juce::Justification::left, false);
-        g.setColour(noiseColour.withAlpha(0.85f));
-        g.drawText("N:" + formatDb(topNoiseDb),
-                   juce::Rectangle<float>(bounds.getX() + 4.0f, bounds.getY() + 16.0f, 55.0f, 12.0f),
-                   juce::Justification::left, false);
+        corner("T:" + formatDb(leftTonalDb), bounds.getX() + 4.0f, bounds.getY() + 4.0f, 55.0f, 12.0f,
+              juce::Justification::left, tonalCol);
+        corner("N:" + formatDb(topNoiseDb), bounds.getX() + 4.0f, bounds.getY() + 16.0f, 55.0f, 12.0f,
+              juce::Justification::left, noiseCol);
 
         // Top-right corner: right tonal dB
-        g.setColour(tonalColour.withAlpha(0.85f));
-        g.drawText("T:" + formatDb(rightTonalDb),
-                   juce::Rectangle<float>(bounds.getRight() - 59.0f, bounds.getY() + 4.0f, 55.0f, 12.0f),
-                   juce::Justification::right, false);
+        corner("T:" + formatDb(rightTonalDb), bounds.getRight() - 59.0f, bounds.getY() + 4.0f, 55.0f, 12.0f,
+              juce::Justification::right, tonalCol);
 
         // Bottom-left corner: bottom noise dB
-        g.setColour(noiseColour.withAlpha(0.85f));
-        g.drawText("N:" + formatDb(bottomNoiseDb),
-                   juce::Rectangle<float>(bounds.getX() + 4.0f, bounds.getBottom() - 40.0f, 55.0f, 12.0f),
-                   juce::Justification::left, false);
+        corner("N:" + formatDb(bottomNoiseDb), bounds.getX() + 4.0f, bounds.getBottom() - 40.0f, 55.0f, 12.0f,
+              juce::Justification::left, noiseCol);
 
         // Bottom-right corner: both max values
-        g.setColour(tonalColour.withAlpha(0.85f));
-        g.drawText("T:" + formatDb(rightTonalDb),
-                   juce::Rectangle<float>(bounds.getRight() - 59.0f, bounds.getBottom() - 52.0f, 55.0f, 12.0f),
-                   juce::Justification::right, false);
-        g.setColour(noiseColour.withAlpha(0.85f));
-        g.drawText("N:" + formatDb(bottomNoiseDb),
-                   juce::Rectangle<float>(bounds.getRight() - 59.0f, bounds.getBottom() - 40.0f, 55.0f, 12.0f),
-                   juce::Justification::right, false);
+        corner("T:" + formatDb(rightTonalDb), bounds.getRight() - 59.0f, bounds.getBottom() - 52.0f, 55.0f, 12.0f,
+              juce::Justification::right, tonalCol);
+        corner("N:" + formatDb(bottomNoiseDb), bounds.getRight() - 59.0f, bounds.getBottom() - 40.0f, 55.0f, 12.0f,
+              juce::Justification::right, noiseCol);
     }
     else
     {
         // When not zoomed, show descriptive labels
         // Top-left: Low Tonal, High Noise (noise only)
-        g.setColour(noiseColour.withAlpha(0.7f));
-        g.drawText("Noise Only",
-                   juce::Rectangle<float>(bounds.getX() + 6.0f, bounds.getY() + 6.0f, 70.0f, 14.0f),
-                   juce::Justification::left, false);
+        drawScreenText(g, *this, "Noise Only",
+                      { juce::roundToInt(bounds.getX() + 6.0f), juce::roundToInt(bounds.getY() + 6.0f), 70, 14 },
+                      11.0f, juce::Justification::left, noiseColour.withAlpha(0.7f));
 
         // Top-right: High Tonal, High Noise (full mix)
-        g.setColour(textColour.withAlpha(0.7f));  // Improved contrast
-        g.drawText("Full Mix",
-                   juce::Rectangle<float>(bounds.getRight() - 56.0f, bounds.getY() + 6.0f, 50.0f, 14.0f),
-                   juce::Justification::right, false);
+        drawScreenText(g, *this, "Full Mix",
+                      { juce::roundToInt(bounds.getRight() - 56.0f), juce::roundToInt(bounds.getY() + 6.0f), 50, 14 },
+                      11.0f, juce::Justification::right, textColour.withAlpha(0.7f));
 
         // Bottom-left: Low Tonal, Low Noise (silent)
-        g.setColour(textColour.withAlpha(0.6f));  // Improved contrast
-        g.drawText("Silent",
-                   juce::Rectangle<float>(bounds.getX() + 6.0f, bounds.getBottom() - 40.0f, 40.0f, 14.0f),
-                   juce::Justification::left, false);
+        drawScreenText(g, *this, "Silent",
+                      { juce::roundToInt(bounds.getX() + 6.0f), juce::roundToInt(bounds.getBottom() - 40.0f), 40, 14 },
+                      11.0f, juce::Justification::left, textColour.withAlpha(0.6f));
 
         // Bottom-right: High Tonal, Low Noise (tonal only)
-        g.setColour(tonalColour.withAlpha(0.7f));
-        g.drawText("Tonal Only",
-                   juce::Rectangle<float>(bounds.getRight() - 66.0f, bounds.getBottom() - 40.0f, 60.0f, 14.0f),
-                   juce::Justification::right, false);
+        drawScreenText(g, *this, "Tonal Only",
+                      { juce::roundToInt(bounds.getRight() - 66.0f), juce::roundToInt(bounds.getBottom() - 40.0f), 60, 14 },
+                      11.0f, juce::Justification::right, tonalColour.withAlpha(0.7f));
     }
 }
 
@@ -842,24 +854,18 @@ void XYPad::drawValueReadout(juce::Graphics& g)
         boxHeight
     );
 
-    g.setColour(backgroundColour.withAlpha(0.9f));
-    g.fillRoundedRectangle(readoutBox, 4.0f);
-
-    g.setColour(gridColour);
-    g.drawRoundedRectangle(readoutBox, 4.0f, 1.0f);
+    // A small LCD readout under the pad (style guide section 6: "Value readout: a
+    // small LCD under the knob, VT323, glow"). Hard-edged, no rounded corners.
+    zqsfx::ui::LookAndFeel::drawScreen(g, readoutBox, false);
 
     // Draw values side by side
-    g.setFont(juce::FontOptions(10.0f));
+    drawScreenText(g, *this, "Tonal: " + tonalStr,
+                  { juce::roundToInt(readoutBox.getX() + 6.0f), juce::roundToInt(readoutBox.getY() + 4.0f), 75, 16 },
+                  13.0f, juce::Justification::left, tonalColour);
 
-    g.setColour(tonalColour);
-    g.drawText("Tonal: " + tonalStr,
-               juce::Rectangle<float>(readoutBox.getX() + 6.0f, readoutBox.getY() + 4.0f, 75.0f, 16.0f),
-               juce::Justification::left, false);
-
-    g.setColour(noiseColour);
-    g.drawText("Noise: " + noiseStr,
-               juce::Rectangle<float>(readoutBox.getX() + 82.0f, readoutBox.getY() + 4.0f, 75.0f, 16.0f),
-               juce::Justification::left, false);
+    drawScreenText(g, *this, "Noise: " + noiseStr,
+                  { juce::roundToInt(readoutBox.getX() + 82.0f), juce::roundToInt(readoutBox.getY() + 4.0f), 75, 16 },
+                  13.0f, juce::Justification::left, noiseColour);
 }
 
 void XYPad::drawBoundaryFill(juce::Graphics& g)
@@ -869,7 +875,11 @@ void XYPad::drawBoundaryFill(juce::Graphics& g)
         return;
 
     auto bounds = getLocalBounds().toFloat();
-    const juce::Colour boundaryColour(0xff000000);  // Pure black for clear boundary
+    // Pure black blackout mask (not a meaning-carrying colour) for the area outside
+    // parameter limits when zoomed — the same exemption the house LookAndFeel itself
+    // uses for shadows (juce::Colours::black/transparentBlack allowed outside the
+    // theme file for shadow/blackout fills).
+    const juce::Colour boundaryColour(juce::Colours::black);
 
     // Calculate visible normalized range
     float halfExtent = 0.5f / zoomLevel_;
@@ -938,13 +948,12 @@ void XYPad::drawMinimap(juce::Graphics& g)
         minimapSize
     );
 
-    // Draw minimap background
-    g.setColour(backgroundColour.withAlpha(0.9f));
-    g.fillRoundedRectangle(minimapBounds_, 3.0f);
-
-    // Draw minimap border - highlight if clickable
-    g.setColour(gridColour.brighter(0.2f));
-    g.drawRoundedRectangle(minimapBounds_, 3.0f, 1.0f);
+    // Draw minimap background — simple lcdBg well + lcdBorder rim (like
+    // zqsfx::ui::PeakMeter's own well treatment), hard-edged, no rounded corners.
+    g.setColour(zqsfx::ui::colour::lcdBg.withAlpha(0.9f));
+    g.fillRect(minimapBounds_);
+    g.setColour(zqsfx::ui::colour::lcdBorder);
+    g.drawRect(minimapBounds_, 1.0f);
 
     // Draw gradient hints (subtle tonal/noise indication)
     juce::ColourGradient tonalHint(
@@ -952,14 +961,14 @@ void XYPad::drawMinimap(juce::Graphics& g)
         tonalColour.withAlpha(0.15f), minimapBounds_.getRight(), minimapBounds_.getCentreY(),
         false);
     g.setGradientFill(tonalHint);
-    g.fillRoundedRectangle(minimapBounds_.reduced(1), 2.0f);
+    g.fillRect(minimapBounds_.reduced(1));
 
     juce::ColourGradient noiseHint(
         noiseColour.withAlpha(0.15f), minimapBounds_.getCentreX(), minimapBounds_.getY(),
         noiseColour.withAlpha(0.0f), minimapBounds_.getCentreX(), minimapBounds_.getBottom(),
         false);
     g.setGradientFill(noiseHint);
-    g.fillRoundedRectangle(minimapBounds_.reduced(1), 2.0f);
+    g.fillRect(minimapBounds_.reduced(1));
 
     // Calculate viewport rectangle in minimap space
     float halfExtent = 0.5f / zoomLevel_;
@@ -988,12 +997,10 @@ void XYPad::drawMinimap(juce::Graphics& g)
     g.fillEllipse(dotX - 3.0f, dotY - 3.0f, 6.0f, 6.0f);
 
     // Draw "click to navigate" hint at bottom of minimap
-    g.setColour(textColour.withAlpha(0.5f));
-    g.setFont(juce::FontOptions(8.0f));
-    g.drawText("click to nav",
-               juce::Rectangle<float>(minimapBounds_.getX() - 2.0f, minimapBounds_.getBottom() + 2.0f,
-                                       minimapBounds_.getWidth() + 4.0f, 10.0f),
-               juce::Justification::centred, false);
+    drawScreenText(g, *this, "click to nav",
+                  { juce::roundToInt(minimapBounds_.getX() - 2.0f), juce::roundToInt(minimapBounds_.getBottom() + 2.0f),
+                    juce::roundToInt(minimapBounds_.getWidth() + 4.0f), 10 },
+                  9.0f, juce::Justification::centred, textColour.withAlpha(0.5f));
 }
 
 void XYPad::zoomIn()
@@ -1085,14 +1092,13 @@ bool XYPad::keyPressed(const juce::KeyPress& key)
 
 void XYPad::focusGained(FocusChangeType /*cause*/)
 {
-    hasFocus_ = true;
-    repaint();
+    // The focus ring itself is now drawn by the house LookAndFeel's own overlay
+    // (setHasFocusOutline(true) in the constructor), not by this component's
+    // paint(), so there is nothing left to repaint here.
 }
 
 void XYPad::focusLost(FocusChangeType /*cause*/)
 {
-    hasFocus_ = false;
-    repaint();
 }
 
 void XYPad::visibilityChanged()
@@ -1130,9 +1136,6 @@ void XYPad::drawHintText(juce::Graphics& g)
     // Latin-1 String constructor renders as mojibake ("\u00e2\u20ac\u00a2").
     juce::String hintText = "Scroll to zoom | Middle-click+drag to pan";
 
-    g.setColour(textColour.withAlpha(0.6f * hintAlpha_));
-    g.setFont(juce::FontOptions(11.0f));
-
     juce::Rectangle<float> hintBox(
         bounds.getCentreX() - 120.0f,
         bounds.getBottom() - 50.0f,
@@ -1140,12 +1143,15 @@ void XYPad::drawHintText(juce::Graphics& g)
         16.0f
     );
 
-    // Background for better readability
-    g.setColour(backgroundColour.withAlpha(0.7f * hintAlpha_));
-    g.fillRoundedRectangle(hintBox.expanded(4.0f, 2.0f), 4.0f);
+    // Background for better readability — hard rect, lcdBg/lcdBorder, no rounding.
+    const auto boxBounds = hintBox.expanded(4.0f, 2.0f);
+    g.setColour(zqsfx::ui::colour::lcdBg.withAlpha(0.7f * hintAlpha_));
+    g.fillRect(boxBounds);
+    g.setColour(zqsfx::ui::colour::lcdBorder.withAlpha(hintAlpha_));
+    g.drawRect(boxBounds, 1.0f);
 
-    g.setColour(textColour.withAlpha(0.8f * hintAlpha_));
-    g.drawText(hintText, hintBox, juce::Justification::centred, false);
+    drawScreenText(g, *this, hintText, hintBox.toNearestInt(), 12.0f,
+                  juce::Justification::centred, textColour.withAlpha(0.8f * hintAlpha_));
 }
 
 void XYPad::drawAxisLabels(juce::Graphics& g)
@@ -1155,23 +1161,21 @@ void XYPad::drawAxisLabels(juce::Graphics& g)
         return;
 
     auto bounds = getLocalBounds().toFloat();
-
-    g.setFont(juce::FontOptions(10.0f));
-    g.setColour(textColour.withAlpha(0.7f));
+    const auto col = textColour.withAlpha(0.7f);
 
     // Bottom axis label: "TONAL" with arrows as < >
-    g.drawText("< Tonal >",
-               juce::Rectangle<float>(bounds.getCentreX() - 35.0f, bounds.getBottom() - 16.0f, 70.0f, 12.0f),
-               juce::Justification::centred, false);
+    drawScreenText(g, *this, "< Tonal >",
+                  { juce::roundToInt(bounds.getCentreX() - 35.0f), juce::roundToInt(bounds.getBottom() - 16.0f), 70, 12 },
+                  10.0f, juce::Justification::centred, col);
 
     // Left axis label: "NOISE" (rotated)
     g.saveState();
     g.addTransform(juce::AffineTransform::rotation(-juce::MathConstants<float>::halfPi,
                                                      bounds.getX() + 10.0f,
                                                      bounds.getCentreY()));
-    g.drawText("< Noise >",
-               juce::Rectangle<float>(bounds.getX() - 25.0f, bounds.getCentreY() - 6.0f, 70.0f, 12.0f),
-               juce::Justification::centred, false);
+    drawScreenText(g, *this, "< Noise >",
+                  { juce::roundToInt(bounds.getX() - 25.0f), juce::roundToInt(bounds.getCentreY() - 6.0f), 70, 12 },
+                  10.0f, juce::Justification::centred, col);
     g.restoreState();
 }
 

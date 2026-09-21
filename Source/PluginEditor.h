@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <zqsfx_ui/zqsfx_ui.h>
 #include "PluginProcessor.h"
 #include "GUI/XYPad.h"
 #include "GUI/SpectrumDisplay.h"
@@ -30,11 +31,20 @@ private:
     std::unique_ptr<XYPad> xyPad;
     std::unique_ptr<SpectrumDisplay> spectrumDisplay;
 
-    // Header controls
-    juce::Label titleLabel;
+    // Header controls. The "UNRAVEL" wordmark is hand-drawn (not a juce::Label) in
+    // its own bespoke bold treatment, deliberately NOT routed through the house
+    // LookAndFeel's silk font: style guide section 1 keeps "logo and wordmark
+    // treatment" with the product (LFlOw's wordmark does the same — see its
+    // PluginEditor.cpp). titleBounds is computed once in resized().
+    juce::Rectangle<int> titleBounds;
     juce::TextButton bypassButton;
     juce::TextButton abButton;        // A/B compare toggle (label shows the active slot)
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttachment;
+
+    // Company mark, header far right (opposite the "UNRAVEL" wordmark) — also the
+    // About-box trigger (style guide section 5).
+    zqsfx::ui::LogoMark logo { "Unravel" };
+    void showAboutBox();
 
     // Separation knobs (rotary style)
     juce::Slider separationKnob;
@@ -111,14 +121,14 @@ private:
     static constexpr int knobAreaHeight  = 100;
     static constexpr int soloMuteHeight  = 50;
 
-    // Colors (from the shared Theme palette)
-    const juce::Colour bgDark     { Theme::bgDark };
-    const juce::Colour bgMid      { Theme::bgMid };
-    const juce::Colour bgLight    { Theme::bgLight };
-    const juce::Colour accent     { Theme::accent };
+    // Colors (from the shared Theme palette). bgDark/bgMid/bgLight/accent/textDim were
+    // removed: once the house LookAndFeel supplies the chassis gradient, hairlines,
+    // and every button/combo/slider colour directly from its own tokens, nothing in
+    // this file read them any more (see docs/ui_migration_report.md). tonalColor/
+    // noiseColor/textBright are still used to colour the TONAL/NOISE section labels
+    // and knob captions, which the house LookAndFeel has no opinion on.
     const juce::Colour tonalColor { Theme::tonal };
     const juce::Colour noiseColor { Theme::noise };
-    const juce::Colour textDim    { Theme::textDim };
     const juce::Colour textBright { Theme::textBright };
 
     // Helper methods

@@ -76,7 +76,6 @@ private:
     // doesn't visibly trail the actual parameter value after automation/presets.
     float animationSpeed = 0.4f;
     bool isDragging = false;
-    bool hasFocus_ = false;
 
     // Panning state (middle mouse button)
     bool isPanning_ = false;
@@ -109,7 +108,6 @@ private:
     float panBoundaryFlash_ = 0.0f;     // Flash alpha when hitting boundary
 
     // Colors
-    juce::Colour backgroundColour;
     juce::Colour gridColour;
     juce::Colour thumbColour;
     juce::Colour thumbHighlightColour;
