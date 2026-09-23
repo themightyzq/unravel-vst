@@ -68,3 +68,6 @@ __pycache__/
 
 # Offline DSP measurement harness build output
 build-harness/
+
+# CMake build trees other than build/ (review, universal, ui gates). Never committed.
+build-*/

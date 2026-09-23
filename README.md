@@ -1,63 +1,48 @@
 # Unravel
 
-**Three-stream Spectral Decomposition Plugin — Tonal / Transient / Noise**
-
 ![Unravel Plugin Interface](assets/screenshot.png?v=1.3.1)
 
-Unravel is a real-time audio plugin that splits a sound into three streams — **Tonal** (sustained / harmonic), **Transient** (drum hits, plosives, consonants, attacks), and **Noise** (stochastic / textural residual) — and lets you re-mix them. Same conceptual structure as iZotope RX's *Deconstruct* module, but real-time and DAW-resident.
+Unravel is a real-time audio plugin that splits a sound into three streams, tonal (sustained and
+harmonic), transient (drum hits, plosives, consonants, attacks), and noise (stochastic, textural
+residue), and lets you remix them. All three streams at 0 dB reconstruct the input exactly. It
+works like iZotope RX's Deconstruct module, but live and DAW-resident. VST3, AU, and Standalone.
+Built with JUCE.
 
-## Features
-
-- **Real-time three-stream separation** — independent gain, solo, and mute on the Tonal, Transient, and Noise streams. Mass-conserving: all three at 0 dB reconstructs the input bit-exactly.
-- **XY Pad + Transient fader** — the pad covers Tonal × Noise (the streams you'd want to sweep continuously); a dedicated vertical fader controls the Transient stream level.
-- **Spectrum Visualization** — three-color stacked ribbon shows the actual per-frequency split (LOG / LIN axis).
-- **Sound Design Presets** — general (Default, Gentle Separation), isolation (Extract Tonal, Extract Noise), and material-specific starting points (Dialogue De-noise, Ambience Rescue, Tame Transients, Transient Punch), each setting the full state across all three streams.
-- **Solo / Mute per stream** — additive solo (standard DAW behavior), mute overrides solo.
-- **Meters** — per-stream level bars, output RMS/peak with peak-hold, and a limiter indicator.
-- **Wet/Dry Mix** — phase-coherent parallel blend against the latency-aligned original.
-- **A/B compare + undo** — two settings slots in the header; Cmd-Z / Shift-Cmd-Z undoes parameter edits.
-- **Full Automation** — every parameter is DAW-automatable.
-- **Latency** — ~43 ms at 48 kHz (2048 samples), reported to the host for automatic delay compensation; block-size invariant, so PDC alignment is exact at any host buffer size.
+The last release is v1.1.0 (2026-01-16). The source in this repo is at 1.3.1, ahead of that
+release.
 
 ## Installation
 
-### From a CI build
-
-Pre-built binaries come from this repo's GitHub Actions. The most up-to-date build
-is the latest green run on the [**Actions**](../../actions) tab — open it, scroll
-down to **Artifacts**, and download the bundle for your platform. Tagged releases
-are also available on the [Releases](../../releases) page when versions are cut.
+Download the latest release from the
+[Releases page](https://github.com/themightyzq/unravel-vst/releases): `Unravel-macOS.zip`,
+`Unravel-Windows.zip`, or `Unravel-Linux.zip`. For the current source (1.3.1), build from source
+(below).
 
 Drop the plugin into your system plugin folder, then rescan in your DAW:
 
-| Platform | VST3 | Audio Unit (AU) |
+| Platform | VST3 | AU |
 |---|---|---|
-| **macOS** | `~/Library/Audio/Plug-Ins/VST3/` | `~/Library/Audio/Plug-Ins/Components/` |
-| **Windows** | `C:\Program Files\Common Files\VST3\` | — |
-| **Linux** | `~/.vst3/` | — |
+| macOS | `~/Library/Audio/Plug-Ins/VST3/` | `~/Library/Audio/Plug-Ins/Components/` |
+| Windows | `C:\Program Files\Common Files\VST3\` | n/a |
+| Linux | `~/.vst3/` | n/a |
 
-#### macOS: first-time install (Gatekeeper)
-
-CI artifacts are not notarized, so on first install macOS may refuse to load the
-plugin ("damaged" / "cannot be opened"). Remove the quarantine attribute once and
-the plugin will load normally:
+Unravel is unsigned, so on first install macOS may refuse to load it ("damaged" or "cannot be
+opened"). Remove the quarantine attribute once:
 
 ```bash
 xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/Unravel.vst3
 xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/Unravel.component
 ```
 
-Then rescan in your DAW.
+Then rescan in your DAW; it runs normally after that.
 
-#### Standalone app (no DAW needed)
+The build also produces `Unravel.app` (macOS) for auditioning without a DAW. On first launch,
+audio input is muted to avoid a feedback loop; open Settings to pick your audio devices and
+un-mute. See [docs/USER_GUIDE.md](docs/USER_GUIDE.md#the-standalone-app).
 
-The build also produces `Unravel.app` (macOS) — a standalone app for quick auditioning without a DAW. Drag it anywhere you keep apps. On first launch you'll see *"Audio input is muted to avoid feedback loop"* — open **Settings…** to pick your audio devices and un-mute. See [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md#the-standalone-app) for details.
+### Building from source
 
-### Building from Source
-
-Requirements:
-- CMake 3.22+
-- C++17 compiler (Xcode, Visual Studio 2022, or GCC 9+)
+Requirements: CMake 3.22+, a C++17 compiler (Xcode, Visual Studio 2022, or GCC 9+).
 
 ```bash
 git clone --recursive https://github.com/themightyzq/unravel-vst.git
@@ -66,70 +51,57 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 ```
 
-Built plugins land in `build/Unravel_artefacts/Release/{VST3,AU}/`; the standalone is at `build/bin/Standalone/Unravel.app`.
+Built plugins land in `build/Unravel_artefacts/Release/VST3/` and
+`build/Unravel_artefacts/Release/AU/`. The standalone app is at `build/bin/Standalone/Unravel.app`.
 
-## Usage
-
-### Quick Start
+## Quick Start
 
 1. Load Unravel as an insert effect on an audio track.
-2. Use the **XY Pad** to balance the two broad streams:
-   - **X-axis**: Tonal gain (sustained / harmonic content)
-   - **Y-axis**: Noise gain (sustained / textural content)
-   - **Scroll wheel**: zoom for fine control (up to 10×). Middle-click + drag pans; the minimap lets you click-navigate. **1×** button resets zoom.
-3. Use the **vertical Transient fader** to the right of the pad to set how much of the impulsive content (drum hits, plosives, attacks) passes through.
-4. Adjust **Separation**, **Focus**, **Floor**, and **Brightness** for fine-tuning. Use the per-stream **Solo / Mute** footer buttons to audition or remove individual streams.
+2. Use the XY pad to balance the two broad streams: X-axis is Tonal gain, Y-axis is Noise gain.
+   Scroll to zoom (up to 10x), middle-click and drag to pan, and click the 1x button to reset.
+3. Use the vertical Transient fader to the right of the pad to set how much of the impulsive
+   content (drum hits, plosives, attacks) passes through.
+4. Adjust Separation, Focus, Floor, and Brightness to fine-tune the split. Use the per-stream
+   Solo and Mute buttons to audition or remove individual streams.
 
-### Parameters
+Eight presets cover common starting points: Default, Gentle Separation, Extract Tonal, Extract
+Noise, Dialogue De-noise, Ambience Rescue, Tame Transients, and Transient Punch.
+
+## Parameters
 
 | Parameter | Description |
 |-----------|-------------|
-| **Tonal Gain** | Level of the harmonic / sustained stream (−60 dB to +12 dB) |
-| **Noise Gain** | Level of the sustained-noise / textural residue stream (−60 dB to +12 dB) |
-| **Transient Gain** | Level of the transient / impulsive stream — drum hits, plosives, attacks (−60 dB to +12 dB) |
-| **Separation** | Strength of tonal vs. non-tonal split (0–100 %) |
-| **Focus** | Bias the detector toward tonal (−100) or non-tonal (+100) |
-| **Floor** | Spectral floor threshold for extreme isolation |
-| **Brightness** | High-frequency shelf EQ on the output (−12 dB to +12 dB) |
-| **Solo / Mute (×3)** | Audition or remove the Tonal, Noise, or Transient stream independently |
+| Tonal Gain | Level of the harmonic/sustained stream (-60 dB to +12 dB) |
+| Noise Gain | Level of the sustained-noise/textural stream (-60 dB to +12 dB) |
+| Transient Gain | Level of the transient/impulsive stream (-60 dB to +12 dB) |
+| Separation | Strength of tonal vs. non-tonal split (0-100%) |
+| Focus | Bias the detector toward tonal (-100) or non-tonal (+100) |
+| Floor | Spectral floor threshold for extreme isolation |
+| Brightness | High-frequency shelf EQ on the output (-12 dB to +12 dB) |
+| Solo / Mute (x3) | Audition or remove the Tonal, Noise, or Transient stream |
 
-### Keyboard & mouse shortcuts (XY pad)
+XY pad shortcuts: arrow keys nudge position, Home resets to 0 dB (centre), scroll wheel zooms in
+and out (up to 10x), middle-click and drag pans when zoomed, and the 1x button resets zoom.
 
-| Input | Action |
-|-----|--------|
-| Arrow keys | Nudge position |
-| Home | Reset to 0 dB (centre) |
-| Scroll wheel | Zoom in / out (up to 10×) |
-| Middle-click + drag | Pan around when zoomed |
-| **1×** button | Reset zoom |
-
-For a full walk-through of every control, see [**docs/USER_GUIDE.md**](docs/USER_GUIDE.md).
-
-### Use Cases
-
-- **Dialog Editing** - Reduce room tone while preserving speech
-- **Music Production** - Extract melodic content or ambient textures
-- **Sound Design** - Decompose sounds into tonal / transient / noise layers and recombine them
-- **Audio Restoration** - Separate noise for targeted processing
+For a full walkthrough of every control, see [docs/USER_GUIDE.md](docs/USER_GUIDE.md).
 
 ## Compatibility
 
-- **Formats**: VST3 (all platforms); Audio Unit / AU (macOS)
-- **Platforms**: macOS 11.0+ (Universal Binary, arm64 + x86_64), Windows 10+, Linux
-- **Channel layouts**: mono and stereo
-- **DAWs**: Logic Pro (AU), Ableton Live, Cubase, Reaper, FL Studio, Soundminer, and other VST3 hosts. (Pro Tools requires AAX and is not currently supported.)
-- **Sample Rates**: 44.1kHz – 192kHz
+Formats: VST3 (all platforms), AU (macOS). Platforms: macOS 11.0+ (Universal Binary,
+arm64 + x86_64), Windows 10+, Linux. Channel layouts: mono and stereo. Sample rates: 44.1 kHz to
+192 kHz. Pro Tools is not supported and will not be: it requires AAX, which is not built.
 
 ### Upgrading from v1.3.0
 
-v1.3.1 changes the AU subtype code from `Unrv` to `UnRv` to satisfy Apple's "at least one uppercase character" requirement. **This is an AU identity change**: Logic Pro and other AU hosts cache plugins by `(manufacturer, subtype, version)`, so v1.3.0 saved sessions will report "plugin not found" for the AU. Resaving the project under v1.3.1 puts the new identity into the session. VST3 sessions are unaffected. If you don't see the plugin in Logic at all after upgrade, run `killall -9 AudioComponentRegistrar` and reopen Logic to flush the AU cache.
+v1.3.1 changes the AU subtype code from `Unrv` to `UnRv` to satisfy Apple's requirement of at
+least one uppercase character. This is an AU identity change: Logic Pro and other AU hosts cache
+plugins by manufacturer, subtype, and version, so a v1.3.0 session will report "plugin not found"
+for the AU. Resave the project under v1.3.1 to put the new identity into the session; VST3
+sessions are unaffected. If the plugin does not appear in Logic at all after upgrading, run
+`killall -9 AudioComponentRegistrar` and reopen Logic to flush the AU cache.
 
-## License
+## Licence
 
-This project is licensed under the **GNU General Public License v3.0** - see the [LICENSE](LICENSE) file for details.
+GPL-3.0-or-later. See `LICENSE`. Built with JUCE. Copyright 2024-2026 ZQ SFX.
 
-Copyright 2024–2026 ZQ SFX.
-
-## Support
-
-For issues and feature requests, please use the [Issues](../../issues) page.
+ZQ SFX, https://www.zq-sfx.com, connect@zq-sfx.com.
