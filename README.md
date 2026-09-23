@@ -1,6 +1,6 @@
 # Unravel
 
-![Unravel Plugin Interface](assets/screenshot.png?v=1.3.1)
+![Unravel Plugin Interface](assets/screenshot.png?v=1.4.0)
 
 Unravel is a real-time audio plugin that splits a sound into three streams, tonal (sustained and
 harmonic), transient (drum hits, plosives, consonants, attacks), and noise (stochastic, textural
@@ -8,14 +8,13 @@ residue), and lets you remix them. All three streams at 0 dB reconstruct the inp
 works like iZotope RX's Deconstruct module, but live and DAW-resident. VST3, AU, and Standalone.
 Built with JUCE.
 
-The last release is v1.1.0 (2026-01-16). The source in this repo is at 1.3.1, ahead of that
-release.
+The current release is v1.4.0 (2026-09-23). It requires macOS 11.0 or later.
 
 ## Installation
 
 Download the latest release from the
 [Releases page](https://github.com/themightyzq/unravel-vst/releases): `Unravel-macOS.zip`,
-`Unravel-Windows.zip`, or `Unravel-Linux.zip`. For the current source (1.3.1), build from source
+`Unravel-Windows.zip`, or `Unravel-Linux.zip`. To build the current source yourself, see Build from source
 (below).
 
 Drop the plugin into your system plugin folder, then rescan in your DAW:

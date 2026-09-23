@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-23
+
+### Changed (portfolio review, 2026-09-21 to 2026-09-23)
+
+- Adopted the ZQ SFX house UI (`zqsfx_ui` v0.2.1): shared LookAndFeel, palette tokens, logo mark.
+- Company identity unified as ZQ SFX (contact connect@zq-sfx.com); shared reference docs synced.
+- README rewritten to state what the plugin does, how to install it, and how to use it.
+- First release since v1.1.0. Binaries declare a macOS 11.0 floor (v1.1.0 declared 15.0 and would not load on macOS 13/14 Intel machines).
+- Everything listed below under the 2026-06-01 to 2026-07-03 passes ships in this release.
+
 ### Added (feature + engine completion, 2026-07-03)
 
 - **Low male dialogue now isolates like everything else.** Dense harmonic combs (f0 ≲ 200 Hz — exactly the male dialogue register) used to defeat the separation: with partials closer than ~8 bins, every partial's median window is filled with its neighbours' skirts, so the whole comb classified as noise and voice retained at only −11 dB in the extracted noise. The low-frequency partial tracker now extends each confirmed sub-300 Hz fundamental to its verified harmonics (up to 2 kHz, four per-frame gates, magnitude-conditional skirts). Voice retention: **−11 dB → −54 dB**; hum handling and every existing gate byte-identical; new permanent harness gate (10-partial 147 Hz voice + hiss bed: voice ≤ −35 dB AND the bed stays).
