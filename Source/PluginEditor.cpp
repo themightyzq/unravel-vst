@@ -1,6 +1,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "Parameters/ParameterDefinitions.h"
+#include "Presets/UserPresets.h"
 
 UnravelAudioProcessorEditor::UnravelAudioProcessorEditor(UnravelAudioProcessor& p)
     : AudioProcessorEditor(&p), audioProcessor(p)
@@ -98,12 +99,19 @@ UnravelAudioProcessorEditor::UnravelAudioProcessorEditor(UnravelAudioProcessor& 
     const int storedH = liveH > 0 ? liveH : static_cast<int>(state.getProperty("editorHeight", defaultHeight));
     setSize(juce::jlimit(480, 750, storedW), juce::jlimit(600, 900, storedH));
 
+    // Watch for whole-state replacements (UserPresets::load(), toggleAB(), and -- the one case
+    // none of the editor's own call sites can see directly -- a host calling
+    // setStateInformation()) so the current-preset label resyncs instead of going stale.
+    state.addListener(this);
+    syncPresetLabelToCurrentState();
+
     startTimerHz(30);
 }
 
 UnravelAudioProcessorEditor::~UnravelAudioProcessorEditor()
 {
     stopTimer();
+    audioProcessor.getAPVTS().state.removeListener(this);
     // No size persistence here: resized() reports the live size to the
     // processor on every layout, and getStateInformation() stamps it into the
     // saved state. Writing the ValueTree from the destructor would dirty the
@@ -372,13 +380,45 @@ void UnravelAudioProcessorEditor::setupSoloMute()
 
 void UnravelAudioProcessorEditor::setupPresets()
 {
-    // No standalone "PRESET" caption: the combo's own placeholder already
-    // reads "Presets", so the label was pure redundancy (REVIEW-DESIGN D2-8).
-    presetLabel.setVisible(false);
+    // Current-preset indicator (see the presetLabel member comment). Small-label style,
+    // matching transientEffLabel below: dim/tinted text, no background, non-interactive.
+    presetLabel.setJustificationType(juce::Justification::centred);
+    presetLabel.setFont(juce::FontOptions(Theme::fontSmall));
+    presetLabel.setColour(juce::Label::textColourId, Theme::textDim);
+    presetLabel.setInterceptsMouseClicks(false, false);
+    presetLabel.setTooltip("The currently loaded preset. Clears once you change a control, "
+                           "since the sound no longer matches what was loaded or saved.");
+    presetLabel.setTitle("Current preset");
+    presetLabel.setDescription("Name of the currently loaded or saved preset, if unchanged");
+    addAndMakeVisible(presetLabel);
 
-    // Preset dropdown. This acts as a loader (an action menu), not a "current state"
-    // indicator: it shows "Presets" when idle and resets after loading, so it can
-    // never falsely claim to reflect controls the user has since moved.
+    // Preset dropdown. This acts as an action menu, not a "current state" indicator: it shows
+    // "Presets" when idle and resets after every action, so it can never falsely claim to
+    // reflect controls the user has since moved. See refreshPresetMenuItems() for the built-in
+    // + user-preset + Save/Rename/Delete/Reveal item list.
+    presetSelector.setTextWhenNothingSelected("Presets");
+    presetSelector.setSelectedId(0, juce::dontSendNotification);
+    // No per-instance backgroundColourId/textColourId/outlineColourId/arrowColourId:
+    // the house LookAndFeel's drawComboBox always draws the LCD-dropdown treatment
+    // (colour::lcdBg/lcdBorder/lcdText/lcdDim) regardless of instance colours.
+    presetSelector.setTooltip("Presets: load a built-in starting point or one of your saved "
+                              "presets (this sets ALL controls), or save/rename/delete a preset "
+                              "of your own. 'Default' resets to neutral.");
+    // Accessibility: ComboBox wants keyboard focus by default; add the focus ring
+    // and a screen-reader name. Enter/arrow keys open and step the menu (D-8/R10).
+    presetSelector.setHasFocusOutline(true);
+    presetSelector.setTitle("Preset");
+    presetSelector.setDescription("Load, save, rename, or delete a preset");
+    presetSelector.onChange = [this]() { handlePresetMenuSelection(); };
+    addAndMakeVisible(presetSelector);
+
+    refreshPresetMenuItems();
+}
+
+void UnravelAudioProcessorEditor::refreshPresetMenuItems()
+{
+    presetSelector.clear(juce::dontSendNotification);
+
     presetSelector.addSectionHeading("General");
     presetSelector.addItem("Default", 1);
     presetSelector.addItem("Gentle Separation", 4);
@@ -390,44 +430,297 @@ void UnravelAudioProcessorEditor::setupPresets()
     presetSelector.addItem("Ambience Rescue", 6);
     presetSelector.addItem("Tame Transients", 7);
     presetSelector.addItem("Transient Punch", 8);
+
+    userPresetNames_ = UserPresets::scan();
+    if (! userPresetNames_.isEmpty())
+    {
+        presetSelector.addSeparator();
+        presetSelector.addSectionHeading("User Presets");
+        for (int i = 0; i < userPresetNames_.size(); ++i)
+            presetSelector.addItem(userPresetNames_[i], userPresetIdBase + i);
+    }
+
+    presetSelector.addSeparator();
+    presetSelector.addItem("Save preset...", savePresetItemId);
+    presetSelector.addItem("Rename preset...", renamePresetItemId);
+    presetSelector.addItem("Delete preset...", deletePresetItemId);
+    presetSelector.setItemEnabled(renamePresetItemId, ! userPresetNames_.isEmpty());
+    presetSelector.setItemEnabled(deletePresetItemId, ! userPresetNames_.isEmpty());
+    presetSelector.addItem("Reveal preset folder", revealPresetItemId);
+
+    // clear() resets the text/selection to nothing; keep the idle placeholder rather than
+    // leaving the combo showing whatever the just-cleared list happened to leave selected.
     presetSelector.setTextWhenNothingSelected("Presets");
     presetSelector.setSelectedId(0, juce::dontSendNotification);
-    // No per-instance backgroundColourId/textColourId/outlineColourId/arrowColourId:
-    // the house LookAndFeel's drawComboBox always draws the LCD-dropdown treatment
-    // (colour::lcdBg/lcdBorder/lcdText/lcdDim) regardless of instance colours.
-    presetSelector.setTooltip("Quick Presets: load a starting point (this sets ALL controls). "
-                              "'Default' resets to neutral. 'Extract Tonal' isolates melodies/harmonics. "
-                              "'Extract Noise' isolates textures/ambience. 'Gentle' gives subtle separation.");
-    // Accessibility: ComboBox wants keyboard focus by default; add the focus ring
-    // and a screen-reader name. Enter/arrow keys open and step the menu (D-8/R10).
-    presetSelector.setHasFocusOutline(true);
-    presetSelector.setTitle("Preset");
-    presetSelector.setDescription("Load a preset that sets all controls");
-    presetSelector.onChange = [this]() {
-        // loadPreset args: tonalDb, noiseDb, transientDb, separation%, focus, floor%, brightnessDb
-        // Extract Tonal / Extract Noise also mute the Transient stream — isolating
-        // a sustained stream means you don't want drum hits / plosives leaking through.
-        switch (presetSelector.getSelectedId())
+}
+
+void UnravelAudioProcessorEditor::handlePresetMenuSelection()
+{
+    const int id = presetSelector.getSelectedId();
+    // Reset to the "Presets" placeholder immediately (no notification -> no re-entry) --
+    // every branch below is a one-shot action, never a "currently selected" state.
+    presetSelector.setSelectedId(0, juce::dontSendNotification);
+
+    // loadPreset args: tonalDb, noiseDb, transientDb, separation%, focus, floor%, brightnessDb, name
+    // Extract Tonal / Extract Noise also mute the Transient stream — isolating
+    // a sustained stream means you don't want drum hits / plosives leaking through.
+    switch (id)
+    {
+        case 1: loadPreset(0.0f,    0.0f,   0.0f, 85.0f,   0.0f, 0.0f,  0.0f, "Default"); return; // neutral, all streams pass — separation matches v1.3.1's new default
+        case 2: loadPreset(0.0f,  -60.0f, -60.0f, 90.0f, -50.0f, 30.0f, 0.0f, "Extract Tonal"); return; // mute noise + transient
+        case 3: loadPreset(-60.0f,  0.0f, -60.0f, 90.0f,  50.0f, 30.0f, 0.0f, "Extract Noise"); return; // mute tonal + transient
+        case 4: loadPreset(0.0f,   -6.0f,   0.0f, 40.0f,   0.0f, 0.0f,  0.0f, "Gentle Separation"); return; // mild de-noise at soft separation — audibly does something; all-unity would be bit-identical to input
+        case 5: loadPreset(0.0f,  -20.0f,  -3.0f, 80.0f, -20.0f, 10.0f, 0.0f, "Dialogue De-noise"); return; // voice intact, room/hiss pulled down, consonants kept
+        case 6: loadPreset(-15.0f,  0.0f,   0.0f, 85.0f,  30.0f, 10.0f, 0.0f, "Ambience Rescue"); return; // drop tonal (music/hum), keep the ambient bed + texture
+        case 7: loadPreset(0.0f,    0.0f, -24.0f, 75.0f,   0.0f, 0.0f,  0.0f, "Tame Transients"); return; // soften clicks/hits, leave the body untouched
+        case 8: loadPreset(0.0f,   -6.0f,  +6.0f, 80.0f,   0.0f, 0.0f,  0.0f, "Transient Punch"); return; // hits forward, bed slightly back
+        case savePresetItemId:   showSavePresetDialog();   return;
+        case renamePresetItemId: showRenamePresetDialog(); return;
+        case deletePresetItemId: showDeletePresetDialog(); return;
+        case revealPresetItemId: revealPresetFolder();     return;
+        default: break;
+    }
+
+    if (id >= userPresetIdBase && id < userPresetIdBase + userPresetNames_.size())
+    {
+        const auto name = userPresetNames_[id - userPresetIdBase];
+        auto result = UserPresets::load(name, audioProcessor);
+        if (result.wasOk())
+            capturePresetSnapshot(name);
+        else
+            juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                "Load Preset Failed", result.getErrorMessage(), "OK", this);
+    }
+}
+
+void UnravelAudioProcessorEditor::showSavePresetDialog()
+{
+    auto* aw = new juce::AlertWindow("Save Preset",
+        "Save the current control settings as a new preset.",
+        juce::MessageBoxIconType::NoIcon, this);
+    aw->addTextEditor("name", presetLabel.getText(), "Name:");
+    aw->addButton("Save", 1, juce::KeyPress(juce::KeyPress::returnKey));
+    aw->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+
+    juce::Component::SafePointer<UnravelAudioProcessorEditor> safeThis(this);
+    aw->enterModalState(true, juce::ModalCallbackFunction::create(
+        [safeThis, aw](int result)
         {
-            case 1: loadPreset(0.0f,    0.0f,   0.0f, 85.0f,   0.0f, 0.0f,  0.0f); break; // Default (neutral, all streams pass) — separation matches v1.3.1's new default
-            case 2: loadPreset(0.0f,  -60.0f, -60.0f, 90.0f, -50.0f, 30.0f, 0.0f); break; // Extract Tonal — mute noise + transient
-            case 3: loadPreset(-60.0f,  0.0f, -60.0f, 90.0f,  50.0f, 30.0f, 0.0f); break; // Extract Noise — mute tonal + transient
-            case 4: loadPreset(0.0f,   -6.0f,   0.0f, 40.0f,   0.0f, 0.0f,  0.0f); break; // Gentle (mild de-noise at soft separation — audibly does something; all-unity would be bit-identical to input)
-            case 5: loadPreset(0.0f,  -20.0f,  -3.0f, 80.0f, -20.0f, 10.0f, 0.0f); break; // Dialogue De-noise — voice intact, room/hiss pulled down, consonants kept
-            case 6: loadPreset(-15.0f,  0.0f,   0.0f, 85.0f,  30.0f, 10.0f, 0.0f); break; // Ambience Rescue — drop tonal (music/hum), keep the ambient bed + texture
-            case 7: loadPreset(0.0f,    0.0f, -24.0f, 75.0f,   0.0f, 0.0f,  0.0f); break; // Tame Transients — soften clicks/hits, leave the body untouched
-            case 8: loadPreset(0.0f,   -6.0f,  +6.0f, 80.0f,   0.0f, 0.0f,  0.0f); break; // Transient Punch — hits forward, bed slightly back
-            default: return;
-        }
-        // Reset to the "Presets" placeholder (no notification → no re-entry).
-        presetSelector.setSelectedId(0, juce::dontSendNotification);
-    };
-    addAndMakeVisible(presetSelector);
+            if (result != 1 || safeThis == nullptr)
+                return;
+
+            const auto name = aw->getTextEditorContents("name").trim();
+            if (name.isEmpty())
+                return;
+
+            if (UserPresets::scan().contains(name, true))
+            {
+                auto* confirm = new juce::AlertWindow("Overwrite Preset?",
+                    "A preset named \"" + name + "\" already exists. Overwrite it?",
+                    juce::MessageBoxIconType::WarningIcon, safeThis.getComponent());
+                confirm->addButton("Overwrite", 1, juce::KeyPress(juce::KeyPress::returnKey));
+                confirm->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+                confirm->enterModalState(true, juce::ModalCallbackFunction::create(
+                    [safeThis, name](int confirmResult)
+                    {
+                        if (confirmResult == 1 && safeThis != nullptr)
+                            safeThis->doSavePreset(name, true);
+                    }), true);
+            }
+            else
+            {
+                safeThis->doSavePreset(name, false);
+            }
+        }), true);
+}
+
+void UnravelAudioProcessorEditor::doSavePreset(const juce::String& name, bool overwrite)
+{
+    auto result = UserPresets::save(name, audioProcessor.getAPVTS(), overwrite);
+    if (result.wasOk())
+    {
+        capturePresetSnapshot(name);
+        refreshPresetMenuItems();
+    }
+    else
+    {
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+            "Save Preset Failed", result.getErrorMessage(), "OK", this);
+    }
+}
+
+void UnravelAudioProcessorEditor::showRenamePresetDialog()
+{
+    const auto names = UserPresets::scan();
+    if (names.isEmpty())
+    {
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,
+            "Rename Preset", "There are no user presets to rename.", "OK", this);
+        return;
+    }
+
+    juce::PopupMenu menu;
+    for (int i = 0; i < names.size(); ++i)
+        menu.addItem(i + 1, names[i]);
+
+    juce::Component::SafePointer<UnravelAudioProcessorEditor> safeThis(this);
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&presetSelector),
+        [safeThis, names](int chosen)
+        {
+            if (chosen <= 0 || safeThis == nullptr)
+                return;
+            safeThis->promptRenamePreset(names[chosen - 1]);
+        });
+}
+
+void UnravelAudioProcessorEditor::promptRenamePreset(const juce::String& oldName)
+{
+    auto* aw = new juce::AlertWindow("Rename Preset",
+        "Rename \"" + oldName + "\" to:",
+        juce::MessageBoxIconType::NoIcon, this);
+    aw->addTextEditor("name", oldName, "New name:");
+    aw->addButton("Rename", 1, juce::KeyPress(juce::KeyPress::returnKey));
+    aw->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+
+    juce::Component::SafePointer<UnravelAudioProcessorEditor> safeThis(this);
+    aw->enterModalState(true, juce::ModalCallbackFunction::create(
+        [safeThis, aw, oldName](int result)
+        {
+            if (result != 1 || safeThis == nullptr)
+                return;
+
+            const auto newName = aw->getTextEditorContents("name").trim();
+            if (newName.isEmpty() || newName == oldName)
+                return;
+
+            auto renameResult = UserPresets::rename(oldName, newName);
+            if (renameResult.wasOk())
+            {
+                // If the renamed preset is the one currently shown as active (unedited since
+                // it loaded), keep the label in sync with its new name.
+                if (safeThis->presetLabel.getText() == oldName)
+                    safeThis->capturePresetSnapshot(newName);
+                safeThis->refreshPresetMenuItems();
+            }
+            else
+            {
+                juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                    "Rename Preset Failed", renameResult.getErrorMessage(), "OK", safeThis.getComponent());
+            }
+        }), true);
+}
+
+void UnravelAudioProcessorEditor::showDeletePresetDialog()
+{
+    const auto names = UserPresets::scan();
+    if (names.isEmpty())
+    {
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,
+            "Delete Preset", "There are no user presets to delete.", "OK", this);
+        return;
+    }
+
+    juce::PopupMenu menu;
+    for (int i = 0; i < names.size(); ++i)
+        menu.addItem(i + 1, names[i]);
+
+    juce::Component::SafePointer<UnravelAudioProcessorEditor> safeThis(this);
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&presetSelector),
+        [safeThis, names](int chosen)
+        {
+            if (chosen <= 0 || safeThis == nullptr)
+                return;
+            safeThis->promptDeletePreset(names[chosen - 1]);
+        });
+}
+
+void UnravelAudioProcessorEditor::promptDeletePreset(const juce::String& name)
+{
+    auto* aw = new juce::AlertWindow("Delete Preset",
+        "Permanently delete \"" + name + "\"? This cannot be undone.",
+        juce::MessageBoxIconType::WarningIcon, this);
+    aw->addButton("Delete", 1, juce::KeyPress(juce::KeyPress::returnKey));
+    aw->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+
+    juce::Component::SafePointer<UnravelAudioProcessorEditor> safeThis(this);
+    aw->enterModalState(true, juce::ModalCallbackFunction::create(
+        [safeThis, name](int result)
+        {
+            if (result != 1 || safeThis == nullptr)
+                return;
+
+            auto removeResult = UserPresets::remove(name);
+            if (removeResult.wasOk())
+            {
+                if (safeThis->presetLabel.getText() == name)
+                {
+                    safeThis->audioProcessor.getAPVTS().state.setProperty("presetName", "", nullptr);
+                    safeThis->presetLabel.setText("", juce::dontSendNotification);
+                    safeThis->presetSnapshot_ = juce::ValueTree();
+                }
+                safeThis->refreshPresetMenuItems();
+            }
+            else
+            {
+                juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                    "Delete Preset Failed", removeResult.getErrorMessage(), "OK", safeThis.getComponent());
+            }
+        }), true);
+}
+
+void UnravelAudioProcessorEditor::revealPresetFolder()
+{
+    auto dir = UserPresets::getPresetDirectory();
+    if (! dir.isDirectory())
+        dir.createDirectory();
+    dir.revealToUser();
+}
+
+void UnravelAudioProcessorEditor::capturePresetSnapshot(const juce::String& name)
+{
+    audioProcessor.getAPVTS().state.setProperty("presetName", name, nullptr);
+    syncPresetLabelToCurrentState();
+}
+
+void UnravelAudioProcessorEditor::syncPresetLabelToCurrentState()
+{
+    auto& apvts = audioProcessor.getAPVTS();
+    const auto name = apvts.state.getProperty("presetName", "").toString();
+    presetLabel.setText(name, juce::dontSendNotification);
+
+    // copyState() already returns a detached deep copy (it flushes live parameter values into
+    // a fresh ValueTree via createCopy() -- see AudioProcessorValueTreeState::copyState()), so
+    // this is a real, independent snapshot to compare future state against, not a reference
+    // that would silently track live edits.
+    presetSnapshot_ = name.isEmpty() ? juce::ValueTree() : apvts.copyState();
+}
+
+void UnravelAudioProcessorEditor::updatePresetDirtyState()
+{
+    if (! presetSnapshot_.isValid())
+        return; // no active preset identity to protect
+
+    auto& apvts = audioProcessor.getAPVTS();
+    if (! apvts.copyState().isEquivalentTo(presetSnapshot_))
+    {
+        // Something changed since the preset was loaded/saved (a control was moved, or host
+        // automation wrote a parameter): the name no longer describes the current sound, so
+        // stop claiming it (the H7 defect this feature must not reintroduce — see TODO.md).
+        apvts.state.setProperty("presetName", "", nullptr);
+        presetLabel.setText("", juce::dontSendNotification);
+        presetSnapshot_ = juce::ValueTree();
+    }
+}
+
+void UnravelAudioProcessorEditor::valueTreeRedirected(juce::ValueTree&)
+{
+    syncPresetLabelToCurrentState();
 }
 
 void UnravelAudioProcessorEditor::loadPreset(float tonalDb, float noiseDb, float transientDb,
                                               float separation, float focus,
-                                              float floor, float brightness)
+                                              float floor, float brightness,
+                                              const juce::String& presetName)
 {
     auto& apvts = audioProcessor.getAPVTS();
 
@@ -477,6 +770,10 @@ void UnravelAudioProcessorEditor::loadPreset(float tonalDb, float noiseDb, float
     // jumps). The request is picked up within a single audio block, well
     // under the 20 ms ramp it suppresses. See REVIEW-AUDIO.md C7.
     audioProcessor.requestParameterStateSnap();
+
+    // Stamp the preset identity so the label beside the menu shows it, and so a saved host
+    // session remembers which preset is active (see capturePresetSnapshot()).
+    capturePresetSnapshot(presetName);
 }
 
 void UnravelAudioProcessorEditor::paint(juce::Graphics& g)
@@ -547,12 +844,13 @@ void UnravelAudioProcessorEditor::resized()
     bypassButton.setBounds(headerRight.removeFromRight(64).reduced(2, 8));
     abButton.setBounds(headerRight.removeFromRight(36).reduced(2, 8));
 
-    // Center: Preset dropdown — width capped so wide windows don't balloon it
-    // into a 400+ px bar (D2-4); the redundant "PRESET" caption is gone (D2-8).
-    auto presetArea = header.reduced(20, 8);
+    // Center: Preset dropdown, with the current-preset name in a sliver underneath —
+    // width capped so wide windows don't balloon it into a 400+ px bar (D2-4).
+    auto presetArea = header.reduced(20, 4);
     if (presetArea.getWidth() > 240)
         presetArea = presetArea.withSizeKeepingCentre(240, presetArea.getHeight());
-    presetSelector.setBounds(presetArea);
+    presetSelector.setBounds(presetArea.removeFromTop(24));
+    presetLabel.setBounds(presetArea);
 
     // === SPECTRUM DISPLAY === (grows with the window — see currentSpectrumHeight)
     auto spectrumArea = bounds.removeFromTop(currentSpectrumHeight()).reduced(padding, 4);
@@ -702,6 +1000,14 @@ void UnravelAudioProcessorEditor::timerCallback()
     {
         undoDemarcationTick_ = 0;
         audioProcessor.getUndoManager().beginNewTransaction();
+    }
+
+    // Current-preset label: check a few times a second (not every 30 Hz tick) whether the
+    // live state has diverged from the last loaded/saved preset, and clear the name if so.
+    if (++presetDirtyCheckTick_ >= 6)
+    {
+        presetDirtyCheckTick_ = 0;
+        updatePresetDirtyState();
     }
 
     // Surface the post-knee effective transient gain when it meaningfully

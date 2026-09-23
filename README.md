@@ -66,6 +66,11 @@ Built plugins land in `build/Unravel_artefacts/Release/VST3/` and
 Eight presets cover common starting points: Default, Gentle Separation, Extract Tonal, Extract
 Noise, Dialogue De-noise, Ambience Rescue, Tame Transients, and Transient Punch.
 
+Save your own presets from the Presets menu (Save preset..., Rename preset..., Delete preset...);
+they load alongside the built-ins and live as `.unrvpreset` files in
+`~/Library/Audio/Presets/ZQ SFX/Unravel/` on macOS (Documents\ZQ SFX\Unravel\Presets on Windows,
+`~/.config/ZQ SFX/Unravel/Presets` on Linux), reachable from the same menu's "Reveal preset folder".
+
 ## Parameters
 
 | Parameter | Description |

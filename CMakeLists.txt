@@ -136,6 +136,8 @@ target_sources(Unravel
         Source/GUI/SpectrumDisplay.h
         Source/GUI/Theme.h
         Source/Parameters/ParameterDefinitions.h
+        Source/Presets/UserPresets.cpp
+        Source/Presets/UserPresets.h
 )
 
 # Add binary data (empty for now)
@@ -200,4 +202,28 @@ target_link_libraries(unravel_ui_snapshot PRIVATE
     zqsfx::ui
     juce::juce_audio_utils
     juce::juce_dsp)
+
+# ---- User-preset round-trip check (ctest) ----
+# Same pamplejuce pattern as unravel_ui_snapshot above: link the plugin's own shared-code
+# target instead of recompiling PluginProcessor.cpp a second time. Constructs the processor
+# directly (no dispatch loop needed -- see tools/ui_snapshot/main.cpp's determinism note) and
+# exercises UserPresets::save/load/remove plus a getStateInformation/setStateInformation
+# round-trip. UNRAVEL_PRESET_DIR (set on the test below) points it at a throwaway directory
+# instead of a real user's preset library.
+enable_testing()
+
+juce_add_console_app(unravel_preset_check PRODUCT_NAME "unravel_preset_check")
+target_sources(unravel_preset_check PRIVATE tools/preset_check/main.cpp)
+target_include_directories(unravel_preset_check PRIVATE
+    Source
+    $<TARGET_PROPERTY:Unravel,JUCE_GENERATED_SOURCES_DIRECTORY>)
+target_link_libraries(unravel_preset_check PRIVATE
+    Unravel
+    zqsfx::ui
+    juce::juce_audio_utils
+    juce::juce_dsp)
+
+add_test(NAME UserPresetsRoundTrip COMMAND unravel_preset_check)
+set_tests_properties(UserPresetsRoundTrip PROPERTIES
+    ENVIRONMENT "UNRAVEL_PRESET_DIR=${CMAKE_BINARY_DIR}/test_output/user_presets")
 
