@@ -4,18 +4,18 @@
 
 Unravel is a real-time audio plugin that splits a sound into three streams, tonal (sustained and
 harmonic), transient (drum hits, plosives, consonants, attacks), and noise (stochastic, textural
-residue), and lets you remix them. All three streams at 0 dB reconstruct the input exactly. It
-works like iZotope RX's Deconstruct module, but live and DAW-resident. VST3, AU, and Standalone.
-Built with JUCE.
+residue), and lets you remix them. All three streams at 0 dB reconstruct the input exactly.
+Inspired by the Deconstruct module in iZotope RX, it runs live inside a DAW. VST3, AU, and
+Standalone. Built with JUCE.
 
 The current release is v1.4.0 (2026-09-23). It requires macOS 11.0 or later.
 
-## Installation
+## Install
 
 Download the latest release from the
 [Releases page](https://github.com/themightyzq/unravel-vst/releases): `Unravel-macOS.zip`,
-`Unravel-Windows.zip`, or `Unravel-Linux.zip`. To build the current source yourself, see Build from source
-(below).
+`Unravel-Windows.zip`, or `Unravel-Linux.zip`. To build the current source yourself, see Build
+from source (below).
 
 Drop the plugin into your system plugin folder, then rescan in your DAW:
 
@@ -39,21 +39,7 @@ The build also produces `Unravel.app` (macOS) for auditioning without a DAW. On 
 audio input is muted to avoid a feedback loop; open Settings to pick your audio devices and
 un-mute. See [docs/USER_GUIDE.md](docs/USER_GUIDE.md#the-standalone-app).
 
-### Building from source
-
-Requirements: CMake 3.22+, a C++17 compiler (Xcode, Visual Studio 2022, or GCC 9+).
-
-```bash
-git clone --recursive https://github.com/themightyzq/unravel-vst.git
-cd unravel-vst
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release
-```
-
-Built plugins land in `build/Unravel_artefacts/Release/VST3/` and
-`build/Unravel_artefacts/Release/AU/`. The standalone app is at `build/bin/Standalone/Unravel.app`.
-
-## Quick Start
+## Use
 
 1. Load Unravel as an insert effect on an audio track.
 2. Use the XY pad to balance the two broad streams: X-axis is Tonal gain, Y-axis is Noise gain.
@@ -71,7 +57,7 @@ they load alongside the built-ins and live as `.unrvpreset` files in
 `~/Library/Audio/Presets/ZQ SFX/Unravel/` on macOS (Documents\ZQ SFX\Unravel\Presets on Windows,
 `~/.config/ZQ SFX/Unravel/Presets` on Linux), reachable from the same menu's "Reveal preset folder".
 
-## Parameters
+### Parameters
 
 | Parameter | Description |
 |-----------|-------------|
@@ -88,6 +74,20 @@ XY pad shortcuts: arrow keys nudge position, Home resets to 0 dB (centre), scrol
 and out (up to 10x), middle-click and drag pans when zoomed, and the 1x button resets zoom.
 
 For a full walkthrough of every control, see [docs/USER_GUIDE.md](docs/USER_GUIDE.md).
+
+## Build from source
+
+Requirements: CMake 3.22+, a C++17 compiler (Xcode, Visual Studio 2022, or GCC 9+).
+
+```bash
+git clone --recursive https://github.com/themightyzq/unravel-vst.git
+cd unravel-vst
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+```
+
+Built plugins land in `build/Unravel_artefacts/Release/VST3/` and
+`build/Unravel_artefacts/Release/AU/`. The standalone app is at `build/bin/Standalone/Unravel.app`.
 
 ## Compatibility
 

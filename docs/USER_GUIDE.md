@@ -6,7 +6,7 @@ Unravel splits a sound into three streams in real time and lets you re-mix them:
 - **Transient** — short broadband events (drum hits, plosives, consonants, picking noise, attacks).
 - **Noise** — the stochastic broadband residual (air, breath, reverb tails, cymbal wash sustain).
 
-This is the same conceptual structure as iZotope RX's **Deconstruct** module, but real-time and DAW-resident. Use it to clean up dialogue, isolate melodic content, extract drum hits from a music bed, remove transients from a sustained tone, separate textures for sound design — or just shape a mix dynamically.
+Inspired by the **Deconstruct** module in iZotope RX, it runs in real time and stays resident in your DAW. Use it to clean up dialogue, isolate melodic content, extract drum hits from a music bed, remove transients from a sustained tone, separate textures for sound design — or just shape a mix dynamically.
 
 This guide covers the controls in plain terms, the install path, the standalone, latency, uninstall, and the common troubleshooting questions.
 

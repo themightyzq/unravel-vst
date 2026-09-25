@@ -12,7 +12,15 @@
 #   2. Developer ID Application certificate installed in Keychain
 #   3. App-specific password created at appleid.apple.com
 #
+# Environment:
+#   ZQSFX_DEVELOPER_ID  Required. Your Developer ID Application signing identity,
+#                       e.g. "Developer ID Application: Your Name (TEAMID)".
+#   ZQSFX_TEAM_ID       Required. Your Apple Developer Team ID (the parenthesized
+#                       part of ZQSFX_DEVELOPER_ID).
+#
 # Usage:
+#   ZQSFX_DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)" \
+#   ZQSFX_TEAM_ID="TEAMID" \
 #   ./sign_and_notarize.sh
 #
 # =============================================================================
@@ -22,8 +30,8 @@ set -e
 # Configuration
 PLUGIN_NAME="Unravel"
 BUNDLE_ID="com.zqsfx.unravel"
-DEVELOPER_ID="Developer ID Application: ZQ SFX (TEAMID)"
-TEAM_ID="TEAMID"
+DEVELOPER_ID="${ZQSFX_DEVELOPER_ID:?Set ZQSFX_DEVELOPER_ID to your Developer ID Application identity}"
+TEAM_ID="${ZQSFX_TEAM_ID:?Set ZQSFX_TEAM_ID to your Apple Developer Team ID}"
 
 # Paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

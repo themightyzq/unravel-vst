@@ -1,6 +1,6 @@
 # Soundminer VST3 Troubleshooting Guide
 
-> Synced copy for this public repository. The canonical copy lives in the ZQ SFX JUCE workspace (`JUCE/docs/`); edit that one and re-sync.
+> This guide is maintained internally by ZQ SFX and synced into this public repository.
 
 ## Supported Platforms/Architectures
 
@@ -46,7 +46,7 @@ spctl --assess -vvv ~/Library/Audio/Plug-Ins/VST3/<YourPlugin>.vst3
 ```
 
 Expected output should show:
-- `Authority=Developer ID Application: ZQ SFX`
+- `Authority=Developer ID Application: <Your Name> (<TEAMID>)`
 - `source=Notarized Developer ID`
 
 ### 3. Check Architecture
@@ -90,10 +90,11 @@ xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/<YourPlugin>.vst3
 
 ### Sign and Notarize for Distribution
 
-Every ZQ SFX project uses the shared notarization script (see `JUCE/docs/NOTARIZATION.md`):
+Sign the built bundles with a Developer ID Application certificate and notarize through Apple's
+notary service before distributing. This project ships a local script for that:
 
 ```bash
-JUCENotarizationTool/sign_and_notarize.sh --product "<PRODUCT_NAME>" --project-dir <project-dir> --build --install
+Scripts/sign_and_notarize.sh
 ```
 
 This script:
