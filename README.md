@@ -101,7 +101,9 @@ v1.3.1 changed the plugin code from `Unrv` to `UnRv` (Apple requires at least on
 character in an AU subtype). v1.0.0 through v1.3.0 used `Unrv`. The plugin code is part of both
 the AU identity and the VST3 class ID, so sessions saved with v1.3.0 or earlier report Unravel
 as missing in both AU and VST3 hosts. To restore a session, insert Unravel again on the track,
-re-apply its settings, and save the project. Sessions saved with v1.3.1 or later are not
+re-apply its settings, and save the project. VST3 hosts that support plugin compatibility (for
+example Cubase and Nuendo) now substitute the new plugin automatically; other VST3 hosts and all
+AU hosts still need Unravel re-inserted. Sessions saved with v1.3.1 or later are not
 affected. If the plugin does not appear in Logic at all after upgrading, run
 `killall -9 AudioComponentRegistrar` and reopen Logic to flush the AU cache.
 

@@ -175,6 +175,9 @@ target_compile_definitions(Unravel
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_VST3_CAN_REPLACE_VST2=0
+        # v1.3.1 changed the plugin code from Unrv to UnRv; declare the old VST3 class ID as
+        # compatible so hosts that support IPluginCompatibility (Cubase, Nuendo) substitute it.
+        "JUCE_VST3_COMPATIBLE_CLASSES=VST3Interface::jucePluginId('ZQSF','Unrv')"
         JUCE_DISPLAY_SPLASH_SCREEN=0
         JUCE_REPORT_APP_USAGE=0
         JUCE_JACK=0

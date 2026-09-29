@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+- Added VST3 plugin compatibility: the VST3 now declares the pre-v1.3.1 class ID (`ZQSF` +
+  `Unrv`) as replaceable, so VST3 hosts that support plugin compatibility (for example Cubase
+  and Nuendo) load older sessions with the new plugin. Other VST3 hosts and all AU hosts still
+  need Unravel re-inserted.
 - Added user preset save: Save/Rename/Delete a preset from the Presets menu, alongside the
   eight built-ins; presets are stored as `.unrvpreset` files under
   `~/Library/Audio/Presets/ZQ SFX/Unravel/` (macOS), with equivalent per-user locations on
