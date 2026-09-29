@@ -97,11 +97,12 @@ arm64 + x86_64), Windows 10+, Linux. Channel layouts: mono and stereo. Sample ra
 
 ### Upgrading from v1.3.0
 
-v1.3.1 changes the AU subtype code from `Unrv` to `UnRv` to satisfy Apple's requirement of at
-least one uppercase character. This is an AU identity change: Logic Pro and other AU hosts cache
-plugins by manufacturer, subtype, and version, so a v1.3.0 session will report "plugin not found"
-for the AU. Resave the project under v1.3.1 to put the new identity into the session; VST3
-sessions are unaffected. If the plugin does not appear in Logic at all after upgrading, run
+v1.3.1 changed the plugin code from `Unrv` to `UnRv` (Apple requires at least one uppercase
+character in an AU subtype). v1.0.0 through v1.3.0 used `Unrv`. The plugin code is part of both
+the AU identity and the VST3 class ID, so sessions saved with v1.3.0 or earlier report Unravel
+as missing in both AU and VST3 hosts. To restore a session, insert Unravel again on the track,
+re-apply its settings, and save the project. Sessions saved with v1.3.1 or later are not
+affected. If the plugin does not appear in Logic at all after upgrading, run
 `killall -9 AudioComponentRegistrar` and reopen Logic to flush the AU cache.
 
 ## Licence

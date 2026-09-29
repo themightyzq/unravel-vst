@@ -117,11 +117,17 @@ juce::Result UserPresets::load (const juce::String& name, UnravelAudioProcessor&
     if (xml == nullptr)
         return juce::Result::fail ("\"" + file.getFullPathName() + "\" is not valid preset data.");
 
+    // The root tag must match the APVTS state type. A foreign or corrupt file would otherwise
+    // reset every parameter and change the state's root type, after which the saved session
+    // fails the tag check in setStateInformation() and resets on reopen.
+    auto& apvts = processor.getAPVTS();
+    if (! xml->hasTagName (apvts.state.getType()))
+        return juce::Result::fail ("\"" + file.getFullPathName() + "\" is not an Unravel preset (wrong root element).");
+
     auto tree = juce::ValueTree::fromXml (*xml);
     if (! tree.isValid())
         return juce::Result::fail ("\"" + file.getFullPathName() + "\" is not valid preset data.");
 
-    auto& apvts = processor.getAPVTS();
     apvts.replaceState (tree);
 
     // Snap smoothers + brightness IIR to the freshly-loaded values on the next processBlock

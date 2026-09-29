@@ -130,7 +130,7 @@ After that, it remembers your settings between launches.
 ### Plugin doesn't show up in my DAW
 
 - **Logic Pro:** Logic loads Audio Units, not VST3 — make sure you copied the **`Unravel.component`** (the AU build) to `~/Library/Audio/Plug-Ins/Components/`. After install, Logic re-validates AUs on next launch; if it didn't, force a rescan via **Preferences → Plug-In Manager → Reset & Rescan Selection**.
-- **Pro Tools:** Pro Tools requires AAX; **Unravel does not currently ship AAX**, so it won't appear in Pro Tools. Sorry.
+- **Pro Tools:** Pro Tools is not supported (it requires AAX, which is not built).
 - **Other VST3 hosts (Ableton, Cubase, Reaper, FL Studio, Soundminer, Studio One, Bitwig, etc.):** make sure `Unravel.vst3` is in the system VST3 folder for your OS (see README) and that the DAW's plugin search path includes it. Rescan; on macOS, hosts often need a relaunch after a fresh install.
 - **Soundminer:** if it fails to load after install, also run `Scripts/clear_soundminer_cache.sh` (Soundminer aggressively caches plugin metadata) and reopen.
 

@@ -6,6 +6,8 @@
 //   2. that loaded/named state itself round-trips through getStateInformation() /
 //      setStateInformation() (a host save + reload) into a FRESH processor, name intact.
 //   3. remove() deletes the file.
+//   4. load() of a file whose XML root tag is not the APVTS state type fails and leaves the
+//      current parameters and state root type unchanged.
 //
 // UNRAVEL_PRESET_DIR (set via ctest's ENVIRONMENT test property) points UserPresets at a
 // throwaway directory instead of a real user's preset library, so this never touches
@@ -88,6 +90,30 @@ int main()
                "presetName did not survive getStateInformation/setStateInformation round-trip") && ok;
     ok = check (nearlyEqual (freshProcessor.getAPVTS().getRawParameterValue (ParameterIDs::separation)->load(), 42.0f),
                "separation did not survive getStateInformation/setStateInformation round-trip") && ok;
+
+    // 5b. A file with the wrong root tag must fail to load and leave the state untouched.
+    {
+        const auto badFile = UserPresets::getPresetDirectory().getChildFile ("badroot.unrvpreset");
+        UserPresets::getPresetDirectory().createDirectory();
+        ok = check (badFile.replaceWithText ("<NotUnravel presetName=\"badroot\"><PARAM id=\"separation\" value=\"99\"/></NotUnravel>"),
+                    "could not write badroot.unrvpreset") && ok;
+
+        const auto typeBefore = apvts.state.getType();
+        const auto sepBefore = apvts.getRawParameterValue (ParameterIDs::separation)->load();
+        const auto badResult = UserPresets::load ("badroot", processor);
+
+        ok = check (badResult.failed(), "load() of a wrong-root-tag file did not report failure") && ok;
+        ok = check (apvts.state.getType() == typeBefore,
+                    "load() of a wrong-root-tag file changed the state root type") && ok;
+        ok = check (nearlyEqual (apvts.getRawParameterValue (ParameterIDs::separation)->load(), sepBefore),
+                    "load() of a wrong-root-tag file changed separation") && ok;
+        ok = check (nearlyEqual (apvts.getRawParameterValue (ParameterIDs::brightness)->load(), 6.0f),
+                    "load() of a wrong-root-tag file changed brightness") && ok;
+        ok = check (apvts.state.getProperty ("presetName").toString() == "check",
+                    "load() of a wrong-root-tag file changed presetName") && ok;
+
+        badFile.deleteFile();
+    }
 
     // 6. remove() deletes the file.
     auto removeResult = UserPresets::remove ("check");

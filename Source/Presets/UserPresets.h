@@ -45,8 +45,8 @@ namespace UserPresets
 
     // Loads `name`: parses its file, replaces the processor's APVTS state, requests a
     // parameter-state snap, and sets "presetName" = name on apvts.state. Fails -- leaving the
-    // processor's state untouched -- if the file doesn't exist or doesn't parse as a valid
-    // Unravel state tree.
+    // processor's state untouched -- if the file doesn't exist or doesn't parse as XML or its
+    // root tag isn't the APVTS state type (a foreign/corrupt file).
     juce::Result load (const juce::String& name, UnravelAudioProcessor& processor);
 
     // Deletes `name`'s file. Fails if it doesn't exist or can't be removed.
