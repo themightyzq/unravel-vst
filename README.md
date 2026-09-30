@@ -8,7 +8,7 @@ residue), and lets you remix them. All three streams at 0 dB reconstruct the inp
 Inspired by the Deconstruct module in iZotope RX, it runs live inside a DAW. VST3, AU, and
 Standalone. Built with JUCE.
 
-The current release is v1.4.0 (2026-09-23). It requires macOS 11.0 or later.
+The current release is v1.5.0 (2026-09-29). It requires macOS 11.0 or later.
 
 ## Install
 

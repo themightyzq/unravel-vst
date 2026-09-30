@@ -25,7 +25,9 @@ endif()
 # refreshes instead of colliding with the 1.3.0 entry.
 # 1.4.0: first release since 1.1.0 (MIX, meters, A/B + undo, low-register
 # isolation, house UI). Deployment target stays 11.0.
-project(Unravel VERSION 1.4.0)
+# 1.5.0: user presets, foreign-preset rejection, VST3 compatibility with
+# pre-1.3.1 sessions.
+project(Unravel VERSION 1.5.0)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
