@@ -125,6 +125,11 @@ private:
     void drawLabels(juce::Graphics& g);
     void drawFrequencyLabels(juce::Graphics& g);
 
+    // dB scale label rects from the latest drawLabels() pass; the frequency labels avoid them.
+    // Message thread only (written and read inside paint()).
+    std::vector<juce::Rectangle<int>> dbLabelRects;
+    static constexpr int dbLabelRightMargin = 5;   // gap between the dB labels and the right edge
+
     // Utility — a single frequency→x mapping (true log or linear) keeps the
     // spectrum, the grid lines, and the frequency labels all consistent.
     float freqToX(float freq, float width) const;

@@ -22,6 +22,25 @@ namespace
         }
     }
 
+    // Size of every screen label on the spectrum (legend, dB scale, frequency scale, empty-state
+    // message). The house LCD face (VT323) is drawn from a point height and its capitals are only
+    // about 0.55 of that: the old 10 pt labels measured roughly 5.5 px cap height on the snapshot.
+    // 18 pt gives roughly 10 px, the floor for readable screen text.
+    constexpr float screenTextPx = 18.0f;
+    constexpr int screenTextRowH = 20;   // box height that holds one line at screenTextPx
+    constexpr int glyphInsetY = 4;       // rows shrink by this top and bottom to approximate glyph height
+
+    // Axis label: screen text on a small backing chip in the screen's own glass colour, so the
+    // grid line that runs through the label's anchor (a horizontal dB line, a vertical decade
+    // line) does not strike through the glyphs at this size.
+    void drawAxisLabel(juce::Graphics& g, juce::Component& c, const juce::String& text,
+                       juce::Rectangle<int> area, juce::Justification just)
+    {
+        g.setColour(zqsfx::ui::colour::lcdBg.withAlpha(0.85f));
+        g.fillRect(area.reduced(0, glyphInsetY).expanded(1, 0));
+        drawScreenText(g, c, text, area, screenTextPx, just, Theme::textDim);
+    }
+
     // Width in px of `text` as drawScreenText() will draw it at `px`, so the legend can lay its
     // entries out from the real glyph widths (the house LCD face and the generic fallback face
     // differ) instead of hard-coded x offsets.
@@ -204,7 +223,7 @@ void SpectrumDisplay::paint(juce::Graphics& g)
     {
         // ASCII only: a raw UTF-8 ellipsis in a char* literal goes through
         // juce::String's Latin-1 constructor and renders as mojibake.
-        drawScreenText(g, *this, "Waiting for audio...", getLocalBounds(), Theme::fontSmall,
+        drawScreenText(g, *this, "Waiting for audio...", getLocalBounds(), screenTextPx,
                       juce::Justification::centred, Theme::textDim);
     }
 }
@@ -399,29 +418,45 @@ void SpectrumDisplay::drawLabels(juce::Graphics& g)
     // dB labels on right side — same dbToY mapping as the grid lines in
     // drawBackground, so each label sits exactly on its line. The 0 dB label
     // is nudged inside the top edge instead of skipped. LCD readout style
-    // (numeric value on the phosphor screen).
+    // (numeric value on the phosphor screen). Right-aligned against dbLabelRightMargin so the
+    // widest label ("-20 dB") ends inside the display; the LOG/LIN toggle (PluginEditor::resized)
+    // sits left of that column. The rects are remembered so the frequency labels can steer clear.
+    //
+    // Density: the loop runs bottom to top, so the 0 dB label (nudged down from the top edge) is
+    // placed last and is dropped when it would sit on the -20 dB label. That happens on short
+    // displays (about 88 px or less, i.e. the minimum and default editor heights); the 0 dB line
+    // is the display's top border and the -20/-40/-60 labels carry the scale. Rects are shrunk
+    // vertically to the glyph height for the test, so labels one row apart still count as clear.
+    dbLabelRects.clear();
     for (float db = minDb + 20.0f; db <= maxDb; db += 20.0f)
     {
         const float y = dbToY(db, height);
-        const int textY = juce::jlimit(2, getHeight() - 28, static_cast<int>(y) - 6);
-        drawScreenText(g, *this, juce::String(static_cast<int>(db)) + " dB",
-                      { getWidth() - 35, textY, 30, 12 },
-                      10.0f, juce::Justification::right, Theme::textDim);
+        const int textY = juce::jlimit(2, getHeight() - screenTextRowH - 2,
+                                       static_cast<int>(y) - screenTextRowH / 2);
+        const juce::String text = juce::String(static_cast<int>(db)) + " dB";
+        const int textW = screenTextWidth(*this, text, screenTextPx);
+        const juce::Rectangle<int> area { getWidth() - dbLabelRightMargin - textW, textY, textW, screenTextRowH };
+
+        bool clear = true;
+        for (const auto& placed : dbLabelRects)
+            clear = clear && ! area.reduced(0, glyphInsetY).intersects(placed.reduced(0, glyphInsetY));
+        if (! clear)
+            continue;
+
+        drawAxisLabel(g, *this, text, area, juce::Justification::centredRight);
+        dbLabelRects.push_back(area);
     }
 
     // Legend at top — three streams, in the same order as the ribbon stacks. Each
     // swatch is followed by its name (colour is never the only signal — the dash
     // pattern on the curve itself is the other cue, per strokeStreamBoundary above).
     //
-    // Size: the house LCD face (VT323) is drawn from a point height, and its capitals are only
-    // about 0.55 of that, so the old 10 pt legend rendered at roughly 5.5 px cap height
-    // (measured on the snapshot). 18 pt gives roughly 10 px, the floor for readable screen text.
-    // Entries are laid out left to right from measured text widths, so they cannot overlap at any
+    // Size: screenTextPx (see the anonymous namespace). Entries are laid out left to right from measured text widths, so they cannot overlap at any
     // editor size; the whole row is about 250 px wide, clear of the LOG toggle (at x 372 of the
     // 460 px wide display at the 480 px minimum editor width).
-    constexpr float legendFontPx = 18.0f;
+    constexpr float legendFontPx = screenTextPx;
     constexpr int legendY = 3;
-    constexpr int legendRowH = 20;
+    constexpr int legendRowH = screenTextRowH;
     constexpr int swatchSize = 10;
     constexpr int swatchGap = 4;
     constexpr int entryGap = 14;
@@ -451,25 +486,52 @@ void SpectrumDisplay::drawFrequencyLabels(juce::Graphics& g)
 {
     auto bounds = getLocalBounds();
     const float width = static_cast<float>(bounds.getWidth());
-    const int labelY = bounds.getHeight() - 14;
 
     // Musical frequency markers, positioned with the same freqToX mapping the
     // spectrum and grid use (so labels sit exactly under their grid lines in
     // both LOG and LIN modes).
+    //
+    // Density: at 18 pt a label is 30 to 40 px wide, and adjacent markers are only about 45 px
+    // apart on the 460 px wide minimum display, so not every marker fits. Decade markers
+    // (100, 1k, 10k) are placed first, then the rest wherever they clear everything already
+    // placed: earlier labels, and the dB scale column (its rects are recorded by drawLabels).
+    // A label is also skipped if it would leave the display. Rects are shrunk vertically by
+    // clashInsetY only, so a frequency label that would sit within a few px under a dB label
+    // (the 10.0k label at the default height) is dropped rather than left cramped.
     const float nyquist = static_cast<float>(currentSampleRate * 0.5);
-    const float freqMarkers[] = {50.0f, 100.0f, 200.0f, 500.0f, 1000.0f, 2000.0f, 5000.0f, 10000.0f, 20000.0f};
+    const int labelY = bounds.getHeight() - screenTextRowH;
+    constexpr int labelGap = 6;
+    constexpr int clashInsetY = 2;   // tighter than glyphInsetY: keeps a few px between rows
 
-    for (float freq : freqMarkers)
+    std::vector<juce::Rectangle<int>> occupied;
+    for (const auto& r : dbLabelRects)
+        occupied.push_back(r.reduced(0, clashInsetY));
+
+    const auto tryPlace = [&](float freq)
     {
-        if (freq > 20.0f && freq < nyquist)
-        {
-            const float x = freqToX(freq, width);
-            if (x > 25.0f && x < width - 35.0f)
-                drawScreenText(g, *this, formatFrequency(freq),
-                              { static_cast<int>(x) - 20, labelY, 40, 12 },
-                              10.0f, juce::Justification::centred, Theme::textDim);
-        }
-    }
+        if (! (freq > 20.0f && freq < nyquist))
+            return;
+
+        const juce::String text = formatFrequency(freq);
+        const int textW = screenTextWidth(*this, text, screenTextPx);
+        const int x = static_cast<int>(freqToX(freq, width));
+        const juce::Rectangle<int> area { x - textW / 2, labelY, textW, screenTextRowH };
+        if (area.getX() < 2 || area.getRight() > bounds.getWidth() - 2)
+            return;
+
+        const auto padded = area.reduced(0, clashInsetY).expanded(labelGap / 2, 0);
+        for (const auto& o : occupied)
+            if (padded.intersects(o))
+                return;
+
+        drawAxisLabel(g, *this, text, area, juce::Justification::centred);
+        occupied.push_back(area.reduced(0, clashInsetY));
+    };
+
+    for (float freq : { 100.0f, 1000.0f, 10000.0f })
+        tryPlace(freq);
+    for (float freq : { 50.0f, 200.0f, 500.0f, 2000.0f, 5000.0f, 20000.0f })
+        tryPlace(freq);
 }
 
 float SpectrumDisplay::binToFrequency(int bin, int totalBins) const

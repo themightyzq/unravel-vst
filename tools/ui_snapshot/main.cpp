@@ -44,6 +44,9 @@ int main (int argc, char** argv)
     // Processor declared before editor: C++ destroys locals in reverse declaration order, so
     // the editor is always torn down before the processor it references (spec requirement).
     UnravelAudioProcessor processor;
+    // A host always prepares the processor before opening the editor; unprepared, the sample rate
+    // is 0 and the spectrum draws no frequency labels. Match a host so the snapshot shows them.
+    processor.setRateAndBufferSizeDetails (48000.0, 512);
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
     if (editor == nullptr)
     {

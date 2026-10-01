@@ -858,9 +858,10 @@ void UnravelAudioProcessorEditor::resized()
 
     // LOG/LIN lives ON the spectrum it controls (D2-5: it used to sit in the
     // footer, five sections away, styled like part of the TRANS group). Placed
-    // left of the right-edge dB labels; added after the display so it z-orders
+    // left of the right-edge dB labels (18 pt, up to about 50 px wide, see
+    // SpectrumDisplay::drawLabels); added after the display so it z-orders
     // above it.
-    scaleToggleButton.setBounds(spectrumArea.getRight() - 88, spectrumArea.getY() + 3, 40, 18);
+    scaleToggleButton.setBounds(spectrumArea.getRight() - 112, spectrumArea.getY() + 3, 40, 18);
 
     // === FOOTER BAR (per-stream Solo/Mute) ===
     auto footerBar = bounds.removeFromBottom(soloMuteHeight).reduced(padding, 6);
