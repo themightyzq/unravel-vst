@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-10-01
+
 - Fixed the spectrum legend (Tonal, Transient, Noise): the names were drawn at about 5.5 px cap
   height and are now about 10 px, with entries laid out from measured text widths so they do not
   overlap at any editor size.
