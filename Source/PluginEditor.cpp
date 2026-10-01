@@ -864,6 +864,10 @@ void UnravelAudioProcessorEditor::resized()
 
     // === FOOTER BAR (per-stream Solo/Mute) ===
     auto footerBar = bounds.removeFromBottom(soloMuteHeight).reduced(padding, 6);
+    // JUCE's resize grip is an 18x18 corner component pinned to the editor's bottom-right
+    // (AudioProcessorEditor::resized). Keep footer controls clear of it, with a 2 px gap.
+    constexpr int resizeGripClearance = 20;
+    footerBar.removeFromRight(resizeGripClearance - padding);
 
     // Three compact groups: TONAL | NOISE | TRANS  (each label 42 + S 44 + M 44 = 130).
     // Width budget at the 480px min: 480 - 2*padding(10) - scaleToggle(48) = 412.

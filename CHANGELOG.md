@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+- Fixed the spectrum legend (Tonal, Transient, Noise): the names were drawn at about 5.5 px cap
+  height and are now about 10 px, with entries laid out from measured text widths so they do not
+  overlap at any editor size.
+- CI now runs ctest and checks that every macOS VST3, AU and Standalone binary is arm64 + x86_64
+  with a minimum macOS of exactly 11.0 on both slices.
+
 ## [1.5.0] - 2026-09-29
 
 - Added VST3 plugin compatibility: the VST3 now declares the pre-v1.3.1 class ID (`ZQSF` +

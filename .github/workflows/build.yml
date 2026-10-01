@@ -60,6 +60,12 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel 4
 
+      # ctest: UserPresetsRoundTrip (tools/preset_check), built by the step above. Windows is
+      # excluded to match the other gates here; the check itself has no platform dependency.
+      - name: Test (macOS + Linux)
+        if: runner.os == 'macOS' || runner.os == 'Linux'
+        run: ctest --test-dir build -C Release --output-on-failure
+
       - name: DSP isolation gate (macOS + Linux)
         if: runner.os == 'macOS' || runner.os == 'Linux'
         run: |
@@ -94,6 +100,13 @@ jobs:
             echo "$archs" | grep -qE "(x86_64.*arm64|arm64.*x86_64)" \
               || { echo "ERROR: $bundle is not Universal (arm64 + x86_64)"; exit 1; }
           done
+
+      # Soundminer needs every slice, and the minimum OS is a release contract (11.0).
+      # Checks each VST3/AU/Standalone binary: arm64 + x86_64, minos exactly 11.0 on both slices,
+      # and no LC_VERSION_MIN_MACOSX (written for targets below 10.14, has no minos line).
+      - name: Verify architectures and minimum macOS 11.0 (macOS)
+        if: runner.os == 'macOS'
+        run: bash Scripts/verify_macos_binaries.sh build
 
       - name: Ad-hoc codesign (macOS)
         if: runner.os == 'macOS'

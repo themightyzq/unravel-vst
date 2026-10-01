@@ -22,6 +22,18 @@ namespace
         }
     }
 
+    // Width in px of `text` as drawScreenText() will draw it at `px`, so the legend can lay its
+    // entries out from the real glyph widths (the house LCD face and the generic fallback face
+    // differ) instead of hard-coded x offsets.
+    int screenTextWidth(juce::Component& c, const juce::String& text, float px)
+    {
+        const auto* lnf = dynamic_cast<zqsfx::ui::LookAndFeel*>(&c.getLookAndFeel());
+        const juce::Font font = lnf != nullptr ? lnf->lcdFont(px) : juce::Font(juce::FontOptions(px));
+        juce::GlyphArrangement glyphs;
+        glyphs.addLineOfText(font, text, 0.0f, 0.0f);
+        return static_cast<int>(std::ceil(glyphs.getBoundingBox(0, -1, true).getWidth())) + 2;
+    }
+
     // Stroke a stream's mask-region boundary with a distinct line style so the three
     // streams are distinguishable without colour (style guide section 3 rule 2):
     // tonal solid, transient dashed, noise dotted.
@@ -400,22 +412,36 @@ void SpectrumDisplay::drawLabels(juce::Graphics& g)
     // Legend at top — three streams, in the same order as the ribbon stacks. Each
     // swatch is followed by its name (colour is never the only signal — the dash
     // pattern on the curve itself is the other cue, per strokeStreamBoundary above).
-    const int legendY = 5;
+    //
+    // Size: the house LCD face (VT323) is drawn from a point height, and its capitals are only
+    // about 0.55 of that, so the old 10 pt legend rendered at roughly 5.5 px cap height
+    // (measured on the snapshot). 18 pt gives roughly 10 px, the floor for readable screen text.
+    // Entries are laid out left to right from measured text widths, so they cannot overlap at any
+    // editor size; the whole row is about 250 px wide, clear of the LOG toggle (at x 372 of the
+    // 460 px wide display at the 480 px minimum editor width).
+    constexpr float legendFontPx = 18.0f;
+    constexpr int legendY = 3;
+    constexpr int legendRowH = 20;
+    constexpr int swatchSize = 10;
+    constexpr int swatchGap = 4;
+    constexpr int entryGap = 14;
 
-    g.setColour(tonalColour.withAlpha(1.0f));
-    g.fillRect(5, legendY, 8, 8);
-    drawScreenText(g, *this, "Tonal", { 15, legendY - 1, 50, 12 }, 10.0f,
-                  juce::Justification::left, Theme::textDim);
+    int legendX = 5;
+    const auto drawLegendEntry = [&](const juce::String& name, juce::Colour colour)
+    {
+        g.setColour(colour.withAlpha(1.0f));
+        g.fillRect(legendX, legendY + (legendRowH - swatchSize) / 2, swatchSize, swatchSize);
+        legendX += swatchSize + swatchGap;
 
-    g.setColour(transientColour.withAlpha(1.0f));
-    g.fillRect(60, legendY, 8, 8);
-    drawScreenText(g, *this, "Transient", { 70, legendY - 1, 60, 12 }, 10.0f,
-                  juce::Justification::left, Theme::textDim);
+        const int textW = screenTextWidth(*this, name, legendFontPx);
+        drawScreenText(g, *this, name, { legendX, legendY, textW, legendRowH }, legendFontPx,
+                      juce::Justification::centredLeft, Theme::textDim);
+        legendX += textW + entryGap;
+    };
 
-    g.setColour(noiseColour.withAlpha(1.0f));
-    g.fillRect(130, legendY, 8, 8);
-    drawScreenText(g, *this, "Noise", { 140, legendY - 1, 50, 12 }, 10.0f,
-                  juce::Justification::left, Theme::textDim);
+    drawLegendEntry("Tonal",     tonalColour);
+    drawLegendEntry("Transient", transientColour);
+    drawLegendEntry("Noise",     noiseColour);
 
     // Draw frequency labels
     drawFrequencyLabels(g);
