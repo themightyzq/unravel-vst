@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-10-02
+
 - Every knob and the Transient fader now takes keyboard focus with a visible ring. Arrow keys
   step the value, Shift+arrow steps a tenth as far, and a double-click returns the control to
   its default value. Layout and sound are unchanged.

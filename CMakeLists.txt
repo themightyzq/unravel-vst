@@ -27,7 +27,7 @@ endif()
 # isolation, house UI). Deployment target stays 11.0.
 # 1.5.0: user presets, foreign-preset rejection, VST3 compatibility with
 # pre-1.3.1 sessions.
-project(Unravel VERSION 1.5.1)
+project(Unravel VERSION 1.6.0)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
