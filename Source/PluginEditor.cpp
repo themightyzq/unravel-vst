@@ -191,19 +191,16 @@ void UnravelAudioProcessorEditor::setupKnobs()
     // / drawVectorKnob use fixed house tokens only), so the old rotarySliderFillColourId
     // / rotarySliderOutlineColourId / thumbColourId / textBox*ColourId sets are gone —
     // dead code once CustomLookAndFeel stopped overriding drawRotarySlider/drawLabel.
-    auto setupKnob = [this](juce::Slider& knob, juce::Label& label,
+    auto setupKnob = [this](zqsfx::ui::Dial& knob, juce::Label& label,
                             const juce::String& name, const juce::String& tooltip) {
         knob.setSliderStyle(juce::Slider::RotaryVerticalDrag);
         knob.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 16);
         knob.setTooltip(tooltip);
-        // Accessibility: juce::Slider defaults to setWantsKeyboardFocus(false)
-        // (juce_Slider.cpp), so enable it explicitly to make the knob a Tab stop.
-        // Arrow keys then adjust the value; the Slider's built-in
-        // AccessibilityValueInterface announces the value from its APVTS-driven
-        // text box. setTitle/setDescription give the screen reader a stable name and
-        // help text (D-8/R10, house accessibility floor item 1).
-        knob.setWantsKeyboardFocus(true);
-        knob.setHasFocusOutline(true);
+        // Accessibility: the knob is a zqsfx::ui::Dial, which already takes keyboard focus
+        // (a Tab stop; arrow keys, Shift+arrow fine step) and shows the focus ring. The
+        // Slider's built-in AccessibilityValueInterface announces the value from its
+        // APVTS-driven text box. setTitle/setDescription give the screen reader a stable
+        // name and help text (D-8/R10, house accessibility floor item 1).
         knob.setTitle(name);
         knob.setDescription(tooltip);
         addAndMakeVisible(knob);
@@ -245,6 +242,15 @@ void UnravelAudioProcessorEditor::setupKnobs()
         audioProcessor.getAPVTS(), ParameterIDs::brightness, brightnessKnob);
     mixAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         audioProcessor.getAPVTS(), ParameterIDs::mix, mixKnob);
+
+    // Double-click returns each knob to its parameter's default; must follow the attachments,
+    // which give the sliders their ranges.
+    auto& apvts = audioProcessor.getAPVTS();
+    zqsfx::ui::setDoubleClickDefault(separationKnob, apvts, ParameterIDs::separation);
+    zqsfx::ui::setDoubleClickDefault(focusKnob, apvts, ParameterIDs::focus);
+    zqsfx::ui::setDoubleClickDefault(floorKnob, apvts, ParameterIDs::spectralFloor);
+    zqsfx::ui::setDoubleClickDefault(brightnessKnob, apvts, ParameterIDs::brightness);
+    zqsfx::ui::setDoubleClickDefault(mixKnob, apvts, ParameterIDs::mix);
 }
 
 void UnravelAudioProcessorEditor::setupSoloMute()
@@ -348,10 +354,8 @@ void UnravelAudioProcessorEditor::setupSoloMute()
     transientGainSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 44, 14);
     transientGainSlider.setColour(juce::Slider::trackColourId, Theme::transient);
     transientGainSlider.setTooltip(transientTooltip);
-    // Accessibility: juce::Slider defaults to no keyboard focus — enable it,
-    // add the focus ring, and name it for the screen reader (D-8/R10).
-    transientGainSlider.setWantsKeyboardFocus(true);
-    transientGainSlider.setHasFocusOutline(true);
+    // Accessibility: a zqsfx::ui::Dial already takes keyboard focus and draws the focus ring;
+    // name it for the screen reader (D-8/R10).
     transientGainSlider.setTitle("Transient Gain");
     transientGainSlider.setDescription(transientTooltip);
     addAndMakeVisible(transientGainSlider);
@@ -376,6 +380,7 @@ void UnravelAudioProcessorEditor::setupSoloMute()
 
     transientGainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         audioProcessor.getAPVTS(), ParameterIDs::transientGain, transientGainSlider);
+    zqsfx::ui::setDoubleClickDefault(transientGainSlider, audioProcessor.getAPVTS(), ParameterIDs::transientGain);
 }
 
 void UnravelAudioProcessorEditor::setupPresets()

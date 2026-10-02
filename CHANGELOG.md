@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+- Every knob and the Transient fader now takes keyboard focus with a visible ring. Arrow keys
+  step the value, Shift+arrow steps a tenth as far, and a double-click returns the control to
+  its default value. Layout and sound are unchanged.
+
 ## [1.5.1] - 2026-10-01
 
 - Fixed the spectrum legend (Tonal, Transient, Noise): the names were drawn at about 5.5 px cap

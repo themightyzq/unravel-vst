@@ -43,7 +43,7 @@ add_subdirectory(JUCE)
 include(FetchContent)
 FetchContent_Declare(zqsfx_ui
     GIT_REPOSITORY https://github.com/themightyzq/zqsfx_ui.git
-    GIT_TAG v0.4.0
+    GIT_TAG v0.5.0
     GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(zqsfx_ui)
 
@@ -231,4 +231,22 @@ target_link_libraries(unravel_preset_check PRIVATE
 add_test(NAME UserPresetsRoundTrip COMMAND unravel_preset_check)
 set_tests_properties(UserPresetsRoundTrip PROPERTIES
     ENVIRONMENT "UNRAVEL_PRESET_DIR=${CMAKE_BINARY_DIR}/test_output/user_presets")
+
+# ---- Editor controls check (ctest) ----
+# Opens the real editor headlessly (same pattern as unravel_preset_check) and walks its
+# children: every parameter-bound slider must be a zqsfx::ui::Dial (keyboard focus, focus ring,
+# Shift+arrow fine step) and double-click must return it to the parameter's default. macOS only:
+# the program reports a skip elsewhere (the Linux ctest step has no display server).
+juce_add_console_app(unravel_editor_controls_check PRODUCT_NAME "unravel_editor_controls_check")
+target_sources(unravel_editor_controls_check PRIVATE tools/editor_controls_check/main.cpp)
+target_include_directories(unravel_editor_controls_check PRIVATE
+    Source
+    $<TARGET_PROPERTY:Unravel,JUCE_GENERATED_SOURCES_DIRECTORY>)
+target_link_libraries(unravel_editor_controls_check PRIVATE
+    Unravel
+    zqsfx::ui
+    juce::juce_audio_utils
+    juce::juce_dsp)
+
+add_test(NAME EditorControls COMMAND unravel_editor_controls_check)
 

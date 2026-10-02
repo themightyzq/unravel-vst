@@ -60,8 +60,10 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel 4
 
-      # ctest: UserPresetsRoundTrip (tools/preset_check), built by the step above. Windows is
-      # excluded to match the other gates here; the check itself has no platform dependency.
+      # ctest: UserPresetsRoundTrip (tools/preset_check) and EditorControls
+      # (tools/editor_controls_check), built by the step above. Windows is excluded to match the
+      # other gates here. EditorControls opens the editor, so it skips itself off macOS (the
+      # Linux job has no display server); UserPresetsRoundTrip has no platform dependency.
       - name: Test (macOS + Linux)
         if: runner.os == 'macOS' || runner.os == 'Linux'
         run: ctest --test-dir build -C Release --output-on-failure

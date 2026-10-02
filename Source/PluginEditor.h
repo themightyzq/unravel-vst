@@ -47,12 +47,14 @@ private:
     zqsfx::ui::LogoMark logo { "Unravel" };
     void showAboutBox();
 
-    // Separation knobs (rotary style)
-    juce::Slider separationKnob;
-    juce::Slider focusKnob;
-    juce::Slider floorKnob;
-    juce::Slider brightnessKnob;
-    juce::Slider mixKnob;
+    // Separation knobs (rotary style). Every parameter slider is a zqsfx::ui::Dial: keyboard
+    // focus + focus ring + Shift+arrow fine step; double-click returns to the parameter default
+    // (setDoubleClickDefault after the attachment).
+    zqsfx::ui::Dial separationKnob;
+    zqsfx::ui::Dial focusKnob;
+    zqsfx::ui::Dial floorKnob;
+    zqsfx::ui::Dial brightnessKnob;
+    zqsfx::ui::Dial mixKnob;
     juce::Label separationLabel;
     juce::Label focusLabel;
     juce::Label floorLabel;
@@ -85,7 +87,7 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> muteTransientAttachment;
 
     // Transient stream gain (vertical fader right of the XY pad)
-    juce::Slider transientGainSlider;
+    zqsfx::ui::Dial transientGainSlider;
     juce::Label  transientGainLabel;
     juce::Label  transientEffLabel;   // shows post-knee effective gain when it differs from the fader
     int undoDemarcationTick_ = 0;     // 30 Hz timer ticks; demarcates undo transactions ~1/s
